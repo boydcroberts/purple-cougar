@@ -119,6 +119,15 @@ describe('a well-timed hop', () => {
     run(g, GOOD + 0.02)
     expect(g.ball.period).toBe(MIN_PERIOD)
   })
+
+  it('clamps to the floor when a ramp step would cross it', () => {
+    const g = createGame(store)
+    g.ball.period = MIN_PERIOD + RAMP_PER_CLEAR / 2
+    armAt(g, GOOD)
+    tap(g)
+    run(g, GOOD + 0.02)
+    expect(g.ball.period).toBe(MIN_PERIOD)
+  })
 })
 
 describe('a mistimed hop', () => {
@@ -210,17 +219,56 @@ describe('bonk recovery', () => {
     expect(drainEvents(g)).toEqual([])
     expect(g.phase).toBe('tumbling')
   })
+
+  it('ignores taps while he is respinning back to his feet', () => {
+    const g = createGame(store)
+    bonkAndSettle(g)
+    run(g, BONK_TUMBLE_DUR + BONK_PAUSE + 0.02)
+    expect(g.phase).toBe('respin')
+    drainEvents(g)
+    tap(g)
+    expect(drainEvents(g)).toEqual([])
+    expect(g.phase).toBe('respin')
+  })
+
+  it('does not bonk on a cord crossing while respinning', () => {
+    const g = createGame(store)
+    bonkAndSettle(g)
+    run(g, BONK_TUMBLE_DUR + BONK_PAUSE + 0.02)
+    expect(g.phase).toBe('respin')
+    drainEvents(g)
+
+    // Force an imminent crossing regardless of how fast the ball is easing
+    // back up — the respin phase itself must be immune, not just lucky.
+    g.ball.theta = (THETA_PASS - 0.001 + TAU) % TAU
+    step(g, 0.01)
+
+    expect(g.phase).toBe('respin')
+    expect(drainEvents(g)).not.toContainEqual({ type: 'bonk' })
+    expect(g.total).toBe(0)
+
+    run(g, BONK_RESPIN + 0.02)
+    expect(g.phase).toBe('ready')
+  })
 })
 
 describe('mashing', () => {
-  it('ignores a tap early in an existing hop', () => {
+  it('ignores a tap early in an existing hop, and only the original hop ever fires', () => {
     const g = createGame(store)
     armAt(g, GOOD)
     tap(g)
-    drainEvents(g)
+    let hops = drainEvents(g).filter((e) => e.type === 'hop').length
+
     run(g, 0.05)
-    tap(g)
+    tap(g) // well outside BUFFER_WINDOW of landing — must be dropped, not buffered
     expect(drainEvents(g)).toEqual([])
+
+    // Run through landing and back to ready. If the early tap were wrongly
+    // buffered, a second 'hop' would fire here.
+    run(g, HOP_DUR - 0.05 + 0.02)
+    hops += drainEvents(g).filter((e) => e.type === 'hop').length
+    expect(g.phase).toBe('ready')
+    expect(hops).toBe(1)
   })
 
   it('buffers a tap near touchdown and fires it on landing', () => {

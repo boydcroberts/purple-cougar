@@ -117,7 +117,12 @@ export function step(g: GameState, dt: number): void {
     if (g.phase === 'hopping' && g.pending === 'clear') {
       g.pending = null
       onClear(g)
-    } else {
+    } else if (g.phase === 'ready' || g.phase === 'hopping') {
+      // Only these two phases can trip him. `tumbling` can't reach here
+      // anyway (the ball is frozen, so swept is always 0), and `respin`
+      // must not, regardless of what the ball's easing constants happen to
+      // allow today — he's getting back on his feet, so a stray crossing
+      // there is a no-op, not a trip.
       onBonk(g)
       return
     }
