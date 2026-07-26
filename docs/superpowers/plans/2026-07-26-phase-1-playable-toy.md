@@ -1949,10 +1949,11 @@ test('the frame loop actually runs at real-time speed', async ({ page }) => {
 })
 ```
 
-- [ ] **Step 3: Run e2e to verify it fails**
+- [ ] **Step 3: Run the e2e suite**
 
 Run: `npx playwright install chromium && npm run e2e`
-Expected: FAIL — no `playwright.config.ts` was present before Step 1, and the suite now runs but any wiring mistake surfaces here.
+
+This is the first run against already-written code, so it is a verification pass, not a red-green step. Any wiring mistake from Task 8 surfaces here.
 
 - [ ] **Step 4: Fix whatever the suite catches, then re-run**
 
