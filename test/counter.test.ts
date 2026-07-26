@@ -50,4 +50,47 @@ describe('counter persistence', () => {
     }
     expect(() => saveTotal(5, hostile)).not.toThrow()
   })
+
+  it('survives a store that throws on read', () => {
+    const hostile: CounterStore = {
+      getItem: () => {
+        throw new Error('SecurityError')
+      },
+      setItem: () => {},
+    }
+    expect(() => loadTotal(hostile)).not.toThrow()
+    expect(loadTotal(hostile)).toBe(0)
+  })
+})
+
+describe('defaultStore (zero-argument calls)', () => {
+  it('is safe when localStorage is undefined, as in this bare-node test environment', () => {
+    expect(loadTotal()).toBe(0)
+    expect(() => saveTotal(5)).not.toThrow()
+  })
+
+  it('is safe when merely accessing localStorage throws, as Safari private mode does', () => {
+    const hadOwnProperty = Object.prototype.hasOwnProperty.call(globalThis, 'localStorage')
+    const originalDescriptor = hadOwnProperty
+      ? Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+      : undefined
+
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('SecurityError: localStorage access is disabled')
+      },
+    })
+
+    try {
+      expect(loadTotal()).toBe(0)
+      expect(() => saveTotal(5)).not.toThrow()
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, 'localStorage', originalDescriptor)
+      } else {
+        Reflect.deleteProperty(globalThis, 'localStorage')
+      }
+    }
+  })
 })
