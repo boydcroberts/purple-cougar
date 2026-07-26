@@ -107,8 +107,12 @@ export function createCougar(): Cougar {
     rightLeg.position.y = 0.52
 
     // The cuffed ankle rides with the body; the cord anchors here.
-    ankleWorld.set(ANKLE.x, ANKLE.y + group.position.y, ANKLE.z)
-    if (roll !== 0) ankleWorld.applyAxisAngle(new Vector3(0, 0, 1), roll)
+    // Let three.js compose the group's T·R·S transform rather than
+    // hand-rolling it — this stays correct regardless of parenting,
+    // offsets, or rotation.
+    ankleWorld.set(ANKLE.x, ANKLE.y, ANKLE.z)
+    group.updateMatrixWorld()
+    group.localToWorld(ankleWorld)
 
     tail.rotation.z = Math.sin(hopP * Math.PI) * 0.3
   }
