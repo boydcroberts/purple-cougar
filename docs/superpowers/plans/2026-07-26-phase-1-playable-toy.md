@@ -1426,6 +1426,14 @@ import type { BallState } from './skipball'
 const ORANGE = '#ff7a1a'
 const BLUE = '#1b57d6'
 
+// Spin is derived from theta, never accumulated per frame: that keeps it
+// frame-rate independent, freezes it when the ball freezes during a tumble,
+// and keeps screenshot QA deterministic. Both MUST be integers — theta wraps
+// at TAU each orbit, and only whole turn-counts cross that seam without a
+// visible pop. 7 ≈ rolling without slipping (orbit 1.15 / ball radius 0.17).
+const SPIN_TURNS_PER_ORBIT = 7
+const TUMBLE_TURNS_PER_ORBIT = 3
+
 /** Orange ball, blue stripes — drawn, not loaded. */
 function stripedTexture(): CanvasTexture {
   const c = document.createElement('canvas')
@@ -1475,8 +1483,8 @@ export function createBallView(): BallView {
       ankle.z + Math.sin(state.theta) * CORD_LENGTH,
     )
     ball.position.copy(ballPos)
-    ball.rotation.z -= 0.14
-    ball.rotation.x -= 0.06
+    ball.rotation.z = -state.theta * SPIN_TURNS_PER_ORBIT
+    ball.rotation.x = -state.theta * TUMBLE_TURNS_PER_ORBIT
 
     cord.position.copy(ankle)
     dir.copy(ballPos).sub(ankle)
