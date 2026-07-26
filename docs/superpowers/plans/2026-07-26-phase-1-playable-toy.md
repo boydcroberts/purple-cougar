@@ -1362,8 +1362,14 @@ export function createCougar(): Cougar {
     rightLeg.position.y = 0.52
 
     // The cuffed ankle rides with the body; the cord anchors here.
-    ankleWorld.set(ANKLE.x, ANKLE.y + group.position.y, ANKLE.z)
-    if (roll !== 0) ankleWorld.applyAxisAngle(new Vector3(0, 0, 1), roll)
+    // Let three compose the transform — hand-rolling it gets the order wrong.
+    // three applies T·R·S, so the translation is added AFTER the rotation;
+    // adding group.position.y to the local point first misplaces the ankle by
+    // ~0.48 units at full tumble (42% of the cord length) and visibly rips the
+    // cord off his leg. Must run after position/rotation/scale are all set.
+    ankleWorld.set(ANKLE.x, ANKLE.y, ANKLE.z)
+    group.updateMatrixWorld()
+    group.localToWorld(ankleWorld)
 
     tail.rotation.z = Math.sin(hopP * Math.PI) * 0.3
   }
