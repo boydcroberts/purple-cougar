@@ -1,262 +1,237 @@
-# Purple Cougar — Design
+# Purple Cougar — Design (rev 2)
 
 **Date:** 2026-07-26
-**Status:** Approved, pre-implementation
+**Status:** Approved, supersedes rev 1 (in git history at `dc41547`)
 
 ## What it is
 
-A 3D web toy for a 3-year-old boy. A purple cougar stands upright with a skip-ball
-cuffed to one ankle — an orange ball with blue stripes on a cord. The ball swings
-around him forever. Tap anywhere on the screen and he hops the cord.
+A 3D web toy for a 3-year-old boy. A detailed, cute purple cougar stands upright
+with a skip-ball cuffed to one ankle, modelled on the real toy he owns and plays with.
+
+Tap anywhere and he does one skip: the cuffed leg swings and drives the ball, the
+free leg hops the cord. Tap in rhythm and the ball winds up faster and wider. Stop
+and it loses energy, droops, and scrapes along the grass. Drag and fling to throw it
+out; the cord catches it and reels it back.
 
 He loves dinosaurs, balls, swimming, pools, and race cars. The toy is built out of
 those things.
 
-Siblings: `67cupcake` (Vite/TS, tested) and `Watermelonboy` (authored-GLB character
-pipeline). This borrows the stack from the first and the character pipeline from the
-second.
+## What changed in rev 2, and why
+
+Rev 1 modelled the ball as a fixed-radius orbit advancing at constant angular speed
+— explicitly *not* physics — with a closed-form clear/bonk timing window.
+
+The project owner's direction on 2026-07-26 was that the ball must behave like the
+real object his son plays with and loves: kickable, throwable, fluid, and it comes
+back. And that the cougar needs far more detail than the primitive stub.
+
+Two consequences, both structural:
+
+- The orbit sim and the closed-form timing rule are replaced by a **tethered-particle
+  simulation**. `skipball.ts` and `hop.ts` are retired; the clear/bonk half of
+  `gameplay.ts` is reworked.
+- The stub cougar is replaced by an **articulated, detailed character**.
+
+What survives unchanged: `scene.ts`, `ui.ts`, `audio.ts`, `counter.ts`, the striped
+ball texture and cord mesh, and the *shape* of the state machine — phases, the
+never-resetting counter, and mash absorption.
+
+This change also resolves a concern raised at the start of rev 1: precise timing is
+hard at three. Rhythm is not.
 
 ## Audience constraints
 
-These are hard requirements, not preferences. Everything below follows from them.
+Unchanged from rev 1. Hard requirements, not preferences.
 
 - **He cannot read.** No text carries meaning. All affordances are pictures, motion, or sound.
 - **He cannot lose.** No game over, no score reset, no fail state, no timer.
 - **He will mash the screen.** Mashing must feel good and must never be punished.
-- **His aim is bad.** The primary control is the entire screen. Secondary controls are
-  giant icon buttons.
-- **He will get bored.** The world changes on its own without him asking.
+- **His aim is bad.** The primary control is the entire screen.
+- **He will get bored.** Things must move and react constantly.
 
 ## Core loop
 
-1. The ball orbits his ankle continuously. The cord sweeps low across the front once
-   per revolution.
-2. Tap anywhere → he hops.
-3. Cord passes under him while he's airborne → **clear**: whoosh, the counter climbs,
-   he grins.
-4. Cord catches his foot → **bonk**: he tumbles over in a heap, the ball flops and
-   rolls, he shakes it off, and the ball starts spinning again.
+1. Tap anywhere → one **skip cycle**: the cuffed leg swings through an arc while the
+   free leg hops.
+2. The swinging ankle drags the ball through the cord. That is the *only* way energy
+   enters the system on a tap — the ball is never pushed directly.
+3. Tap roughly in phase with the ball's swing and energy accumulates, exactly like
+   pumping a playground swing: the orbit widens, speeds up, and lifts.
+4. Stop tapping and drag, gravity, and ground friction bleed it off. The ball droops,
+   drops, and scrapes along the grass.
+5. Drag and release anywhere → **fling**: an impulse in the swipe direction. The ball
+   arcs away, the cord snaps taut, and it swings back around.
 
-**The counter never resets.** It is a cumulative lifetime hop count persisted to
-`localStorage`. It only ever goes up. This is the whole no-fail promise in one number.
+The counter increments once per skip and is a cumulative lifetime total persisted to
+`localStorage`. **It never resets.**
 
-Every 10 clears he travels to a different world with a cheer.
+## The real toy — match it
 
-## Skip-ball model
+The owner photographed the actual toy on 2026-07-26. Match it, because a 3-year-old
+recognising *his own ball* is worth more than any styling choice we would invent.
 
-Not rope physics. A cartoon orbit that is cheap, deterministic, and testable.
-
-- He stands upright on his hind legs — anthropomorphic, cartoon-styled. A quadruped
-  can't use a Skip-It, and a biped rig is far simpler to author.
-- Cuff on the right ankle. Ball orbits at radius `L`, in a plane roughly parallel to
-  the ground with a slight tilt so it reads in 3D.
-- Orbit angle `θ` advances at `ω`. The cord is a tube from ankle to ball.
-- The cord sweeps past the free (left) foot at a fixed angle `θ_pass`, in front of him.
-
-### Hop resolution
-
-```
-tap at t_tap
-  → hop begins, total duration HOP_DUR (0.45s)
-  → free foot airborne over [t_tap + 0.10, t_tap + 0.35]
-
-t_cross = next time θ reaches θ_pass
-
-clear  if t_cross ∈ airborne window
-bonk   otherwise
-```
-
-This is pure math over `(θ, ω, t_tap)` with no scene dependency, so it unit-tests
-directly.
-
-### Mash handling
-
-- Taps during an active hop are ignored, except within the last 0.15s, which buffers
-  the next hop so held rhythm feels responsive.
-- Mashing therefore produces near-continuous hopping, which clears most passes by
-  luck. That is the intended outcome, not a bug to fix.
-
-### Speed
-
-- Base period `T = 1.4s` per revolution — deliberately slow.
-- Ramps gently with consecutive clears: `T -= 0.0225` per clear, floored at `0.95s`.
-- Resets to base on a bonk.
-
-### Bonk recovery
-
-Tumble clip (~1.2s) → ball drops and rolls → 0.8s beat → ball respins from rest,
-`ω` eases back to base over 0.6s. The counter is untouched. Streak resets, which
-only affects speed.
-
-### Tunables
-
-Every number above lives in one exported constants block. The correct difficulty for
-a 3-year-old is whatever we observe him actually landing, so all of it is expected
-to change after the first real play session.
-
-| Constant | Start | Note |
+| Part | Reality | Note |
 |---|---|---|
-| `HOP_DUR` | 0.45s | full hop |
-| `AIRBORNE` | [0.10, 0.35] | clear window |
-| `BASE_PERIOD` | 1.4s | per revolution |
-| `MIN_PERIOD` | 0.95s | speed floor |
-| `RAMP_PER_CLEAR` | 0.0225s | speed ramp |
-| `BUFFER_WINDOW` | 0.15s | late-tap buffer |
-| `TRAVEL_EVERY` | 10 clears | world rotation |
+| Ball | Matte **orange**, hollow rubber, with several **thin green stripes** curving around it like meridians | Rev 1 specced blue stripes from an early verbal description. The photo supersedes it. |
+| Cord | **Thin black** cord, long and very floppy — photographed lying in loose slack coils | Not white, not rigid. The slack is the toy's most characteristic look. |
+| Cuff | A **red fabric strap** with a **black velcro patch** across it | Not a teal ring. |
+| Attachment | A visible knot/grommet where the cord enters the **top of the ball** | Small but it is what sells it as the real object. |
 
-## Character
+The cord's floppiness in the photo is direct evidence for the slack/taut treatment
+below: a permanently straight cord would read as fake immediately.
 
-Authored GLB, generated deterministically by `tools/build-character.mjs`
-(`@gltf-transform`), validated by `npm run validate:character`. Same approach as
-Watermelonboy, because a rigged hopping character is the hard part of this build and
-hand-rolling one from three.js primitives is misery.
+## Ball physics
 
-- **Rig:** root, spine, head, tail, two arms, two legs. Ankle cuff is a rig node so
-  `skipball.ts` can attach the cord to it.
-- **Clips:** `Idle`, `Hop`, `Land`, `Tumble`, `Cheer`, `Look`.
-- **Look:** purple fur, big friendly eyes, cartoon proportions, toon-ish shading. Cute
-  and funny, never menacing.
-- **The ball and cord are procedural**, driven in code — only the ankle cuff is
-  authored into the GLB.
+The central idea: **the ball is never pushed directly.** The ankle is a moving anchor,
+the cord is an inextensible constraint, and swinging the leg drags the ball along.
+That is how the real toy works, and it is what makes the motion feel right rather than
+scripted.
 
-Node names must avoid dots. (Watermelonboy hit a three r128 GLTFLoader bug that strips
-them; modern three via npm doesn't, but the convention costs nothing.)
+Per fixed timestep, in order:
 
-## Worlds
+1. **Gravity** — `vel.y -= G * dt`
+2. **Drag** — `vel *= exp(-DRAG * dt)` (frame-rate independent; never a raw `1 - k*dt`)
+3. **Integrate** — `pos += vel * dt`
+4. **Cord constraint** — position-based. If `|pos - anchor| > CORD_LENGTH`, project
+   `pos` back onto the sphere of that radius around the anchor and remove the outward
+   radial component of `vel`. Below that distance the cord is **slack** and does
+   nothing — the ball is in free flight.
+5. **Ground** — if `pos.y < BALL_RADIUS`, clamp it, reflect `vel.y` with restitution,
+   and apply friction to the horizontal components.
 
-`World` is an interface so adding a fourth is a file, not a refactor:
+The anchor is the cuffed ankle's world position, which the character rig updates every
+frame. Energy therefore enters the system through limb motion, and the whole
+wind-up/decay behaviour is emergent rather than authored.
 
-```ts
-interface World {
-  id: string
-  build(scene: Scene): void
-  update(dt: number, state: GameState): void
-  objects: NamedObject[]   // { slug, label, node }
-  palette: Palette
-  ambience: AudioCue
-}
-```
+**Fixed timestep.** The sim runs at a fixed 1/120 s internally with an accumulator,
+regardless of display refresh rate. A constraint solver stepped at variable `dt` is
+not reproducible, and Task-level tests plus screenshot QA both depend on
+reproducibility.
 
-Three worlds ship in v1:
+**Determinism.** Given the same anchor path and the same taps, the ball must follow
+the same trajectory every run. No `Math.random()` anywhere in the sim.
 
-- **🦕 Dino jungle** — friendly cartoon dinosaurs bobbing and stomping behind him,
-  ferns, warm green light.
-- **🏊 Pool** — deck, floatie ring, bright blue water; every hop kicks up a splash.
-- **🏎 Race track** — cars zooming past, checkered flags, tire stacks.
+## The skip cycle
 
-Travel happens automatically every 10 clears via a crossfade — he keeps hopping right
-through it. Three giant icon buttons sit on screen the entire time so he can also just
-pick. Set dressing uses a seeded RNG so every load is identical and screenshot QA is
-stable.
+One tap runs a single cycle, roughly 0.5 s:
 
-### `NamedObject` — the seam
+| Beat | Cuffed leg | Free leg |
+|---|---|---|
+| Wind | rotates back at the hip | plants |
+| Drive | sweeps forward and through | pushes off |
+| Float | follows through | tucked up, clearing the cord |
+| Land | returns under the body | plants, small squash |
 
-Every meaningful set piece is tagged `{ slug, label, node }`. Nothing in v1 reads
-these. It is one line per object and it is what the deferred word layer needs, so it
-goes in now.
+The hop is part of the cycle, not a separate skill — the free foot is up during
+Float by construction, so he clears the cord as a matter of animation rather than
+player timing.
+
+**Mashing.** A tap during an active cycle is absorbed, except within a buffer window
+of the end, which queues the next cycle so held rhythm stays responsive.
+
+## Trips
+
+He trips only when the ball has gone slack and low — when its energy has fallen below
+a threshold and the cord is dragging on the ground as he skips. He tumbles over,
+lies there, shakes it off, and gets up. The ball rolls to a stop nearby.
+
+The counter is untouched. A trip is the natural consequence of having stopped playing,
+and it reads as comedy, not punishment. It is also the strongest possible invitation
+to tap again.
+
+## The cougar
+
+Cute and unmistakably a cougar. Kawaii proportions — big head, big eyes, chunky paws —
+but every species cue present and readable. Never realistic. (Same direction as
+MenuCritter's critters.)
+
+**Detail that must be present:**
+
+- Big expressive eyes with pupils and specular highlights, and brow ridges that can tilt
+- A proper muzzle with a pink nose and whiskers
+- Rounded ears with inner-ear colour
+- Cream muzzle, chest, and belly against the purple
+- A long tail with a dark tip, built as a segmented chain so it can sway and curl
+- Chunky paws with visible toes
+- A cuff on the right ankle where the cord anchors
+
+**Articulation.** A real joint hierarchy of nested groups, not a bag of loose meshes:
+`root → hips → torso → neck → head`, with `shoulder → upperArm → foreArm → paw` and
+`hip → thigh → shin → paw` chains on each side, plus a tail chain. Poses are joint
+rotations. The kick and hop must actually bend at the hip and knee.
+
+The cuffed ankle's world position is read off the rig each frame and handed to the
+physics as the anchor. That coupling is the whole design: **the rig drives the ball.**
+
+## The world
+
+A pleasant meadow, not an empty plane: rolling hills on the horizon, drifting clouds,
+scattered flowers and grass tufts, warm key light with a cool fill and a rim light to
+separate him from the background.
+
+The camera must keep him framed through a tumble. Rev 1 rotated him about his feet and
+he slid out of the bottom-left corner — the camera either follows or the tumble pivots
+about his body centre.
 
 ## Explicitly deferred
 
-Not in v1. Both have a clean seam already designed in; neither should be built until
-he's actually played the toy.
+Unchanged from rev 1. Neither is built until he has played this.
 
-**Word teaching.** The plan, when it happens: a voice counts every hop out loud, and
-every 5th hop the action pauses ~2s while the camera pushes in on one real scene
-object, which wiggles while its name appears large and is spoken twice. Naming things
-that are actually in his world beats flashcards and needs no card art. Seams that
-exist for it: `NamedObject` tags, and `camera.ts` push-in.
+**Word teaching and voice.** A voice counting skips, and a spotlight beat naming
+objects in the scene. Seams that exist for it: `NamedObject` tags on set pieces, and a
+camera push-in.
 
-Voice would be `speechSynthesis` with a per-slug recorded-clip override
-(`assets/voice/<slug>.mp3` wins if the file exists). Recording clips is a real chore
-and is not worth it until the toy has proven itself. Note that voice is not severable
-from word teaching — a non-reader gets nothing from a silent card.
+**Three worlds** — dino jungle, pool, race track — behind a `World` interface, with
+big picture buttons.
 
-**A scary beat.** Deliberately not built. Tone for v1 is sunny, cute, funny. If it
-ever happens it slots into the spotlight system as a crouch → pounce → roar-that-
-becomes-a-kitten-mew → flop, with a tunable 0–1 intensity.
+**A scary beat.** Tone stays sunny.
 
 ## Stack
 
-- Vite + TypeScript, three.js via npm
-- vitest (unit) + playwright (e2e)
-- iPad touch-first, full-bleed, portrait and landscape; click + spacebar stay wired for
-  Mac QA
-- GitHub → Vercel auto-deploy on `main`
+Unchanged. Vite + TypeScript, three.js, vitest + playwright, iPad touch-first,
+full-bleed, click and spacebar kept alive for Mac QA, GitHub → Vercel.
 
 ```
 purple-cougar/
-  index.html
   src/
-    main.ts          bootstrap, rAF loop, resize, input
-    gameplay.ts      hop state machine, streak, counter, persistence
-    skipball.ts      orbit sim, cord geometry, pass detection
-    cougar.ts        GLB load, clip playback, rig access
-    camera.ts        framing, shake, push-in
-    named.ts         NamedObject tagging
-    audio.ts         SFX bus
-    ui.ts            counter + three world buttons
-    worlds/
-      world.ts       interface, registry, travel crossfade
-      dino.ts  pool.ts  race.ts
-  tools/
-    build-character.mjs      authors assets/purple-cougar.glb
-    validate-character.mjs   contract check
-    capture.mjs              screenshot QA harness
-  assets/purple-cougar.glb
+    main.ts          bootstrap, rAF loop, fixed-step accumulator, input
+    constants.ts     every tunable
+    physics.ts       tethered-particle sim          [replaces skipball.ts]
+    gameplay.ts      skip-cycle state machine, counter, trips
+    counter.ts       lifetime total, persistence
+    cougar/
+      rig.ts         joint hierarchy + pose API
+      head.ts        face, eyes, muzzle, ears, whiskers
+      body.ts        torso, limbs, paws, tail
+      pose.ts        skip cycle, idle, tumble
+    ballView.ts      ball mesh, slack/taut cord, roll from velocity
+    scene.ts         renderer, camera, lights
+    world.ts         hills, clouds, flowers
+    ui.ts            counter overlay
+    audio.ts         synthesized sfx
+  tools/  capture.mjs
   test/   e2e/
 ```
 
 ## Testing
 
-**Unit (vitest)** — the hop math is the highest-value target and is pure:
+The physics sim is pure and is the highest-value unit-test target: cord slack vs taut,
+energy decay monotonicity under no input, ground restitution and friction, determinism
+across identical inputs, and the invariant that the ball can never end a step further
+than `CORD_LENGTH` from the anchor.
 
-- clear/bonk resolution across the full phase space of `(θ, ω, t_tap)`
-- late-tap buffering behavior
-- speed ramp and floor
-- bonk recovery restores base period, leaves counter untouched
-- counter persistence round-trip
-- world rotation cadence
+The rig is testable too, headlessly: joint chains resolve, and the cuffed ankle's world
+position is where the pose says it should be.
 
-**E2E (playwright)** — boots without console errors; canvas renders; tap produces a
-hop; counter increments; counter survives reload; world button switches world; auto
-travel fires at 10.
-
-**Visual** — `tools/capture.mjs`, standalone `playwright-core` with its own headless
-Chrome, shots to `~/agents/screenshots/purple-cougar/`.
-
-### Environment gotchas carried over from the sibling repos
-
-- **`--use-angle=metal` is required** in `launchOptions.args` on darwin, or headless
-  Chromium silently falls back to SwiftShader at ~3fps and every rAF-driven wait times
-  out. This turned 67cupcake's entire e2e suite red once. Always check the pre-change
-  baseline before blaming new work for e2e failures.
-- **`capture.mjs` must launch its own browser**, not the shared `ms-playwright-mcp`
-  profile, which locks when another Claude session holds it. Never kill the other
-  session's Chrome.
-- **Brave blocks WebGL** via Shields — the character won't render. Chrome only.
-- Run implementers sequentially, or give each a worktree. Parallel agents committing
-  to a non-worktree repo detached HEAD on 67cupcake.
+E2E and screenshot QA as before, via `tools/capture.mjs` with its own browser and
+`--use-angle=metal` on darwin.
 
 ## Deploy
 
-GitHub `boydcroberts/purple-cougar` → Vercel, target `purplecougar.vercel.app`.
-**Boyd controls all pushes.** Nothing is pushed without him saying so.
-
-## Build order
-
-Playable in his hands as early as possible.
-
-1. **The toy.** Scene, skip-ball sim, tap-to-hop, clear/bonk, counter, rough primitive
-   cougar. This is already the entire experience.
-2. **The character.** Swap in the authored GLB with real Hop/Land/Tumble/Cheer clips.
-3. **The worlds.** World interface, dino/pool/race, travel crossfade, icon buttons.
-4. **The juice.** Audio, splashes, dust, camera shake, tumble comedy, landing squash.
-5. **Deploy.**
-
-Phase 1 is the gate that matters: if the hop doesn't feel good with a cube for a
-cougar, no amount of art fixes it.
+GitHub `boydcroberts/purple-cougar` → Vercel. **Boyd controls all pushes.**
 
 ## Open
 
-- Difficulty tunables are guesses until he plays. Expect to revise the whole table.
-- Whether the word layer ever ships is a decision to make after watching him, not now.
+All physics constants are guesses until he plays it. Gravity, drag, restitution,
+cord length, and the energy threshold for tripping are expected to be retuned
+together, since they interact.
