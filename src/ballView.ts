@@ -14,6 +14,16 @@ import type { BallState } from './skipball'
 const ORANGE = '#ff7a1a'
 const BLUE = '#1b57d6'
 
+// Ball roll, derived from theta (not accumulated) so it's frame-rate independent
+// and freezes automatically whenever the orbit stops (tumble phase).
+// Rolling-without-slipping estimate: CORD_LENGTH / ball radius = 1.15 / 0.17 ≈ 6.8
+// turns per orbit, rounded to the nearest integer so the rotation is continuous
+// across the theta wrap at TAU (a non-integer turn count would visibly pop there).
+const SPIN_TURNS_PER_ORBIT = 7
+// Secondary axis, smaller so it tumbles rather than spinning perfectly flat.
+// Kept at the original brief's 3:7 ratio (0.06 : 0.14) between the two axes.
+const TUMBLE_TURNS_PER_ORBIT = 3
+
 /** Orange ball, blue stripes — drawn, not loaded. */
 function stripedTexture(): CanvasTexture {
   const c = document.createElement('canvas')
@@ -63,8 +73,8 @@ export function createBallView(): BallView {
       ankle.z + Math.sin(state.theta) * CORD_LENGTH,
     )
     ball.position.copy(ballPos)
-    ball.rotation.z -= 0.14
-    ball.rotation.x -= 0.06
+    ball.rotation.z = -state.theta * SPIN_TURNS_PER_ORBIT
+    ball.rotation.x = -state.theta * TUMBLE_TURNS_PER_ORBIT
 
     cord.position.copy(ankle)
     dir.copy(ballPos).sub(ankle)
