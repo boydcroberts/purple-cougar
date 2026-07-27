@@ -1,5 +1,42 @@
 # Purple Cougar Roadmap
 
+## Next up (owner direction, 2026-07-27, supersedes Phase 3 for now)
+
+The owner's next focus is **the background/scenery/backdrop** — current
+verdict was blunt: "amazing looking cougar but a childish looking fake
+background." This takes priority over the Phase 3 plan below until it's
+addressed. Scope is exactly ROADMAP's existing "Focus now" list further
+down (lake, squirrel, garden, scenery, sunset) — nothing new to invent, just
+finally executed well.
+
+**A same-session attempt on 2026-07-27 was fully reverted** — read this
+before touching scenery code again:
+- Softer painterly clouds (canvas-gradient billboards replacing the old
+  hard-edged dodecahedron puffs) and a mottled ground texture (replacing the
+  flat single-colour plane) both looked like real improvements when actually
+  checked in a screenshot — that part of the approach is sound, worth
+  re-attempting.
+- Moving the lake closer to fix ROADMAP's own "24px sliver" diagnosis (using
+  `parkBackdrop.ts`'s `placeInView(screenLeft, depth)` helper, confirmed live
+  via `window.__pc.project()` that local X = -screenLeft and local Z = 13.794
+  - depth exactly) **put the water inside the WNC garden crescent's own
+  footprint** (`bedOuterRadius()` in `wncGarden.ts` reaches 5.5 world units
+  from origin; the relocated lake center landed at radius ~3.4) — flowers
+  rendered through the water. Any future lake-visibility fix must check
+  world-space overlap against the garden crescent (and the meadow's own
+  `PLAY_RADIUS`) BEFORE picking coordinates, not after.
+- **Screenshots stopped working partway through** — Playwright's built-in
+  `browser_take_screenshot` started timing out (5s) because this MCP's Chrome
+  runs on `--enable-unsafe-swiftshader` (software WebGL, not real GPU); added
+  scene complexity pushed per-frame render time past the timeout. Workaround:
+  `browser_evaluate` a canvas `toDataURL()` read after an explicit `setTimeout`
+  wait, rather than the screenshot tool, when the scene is heavy.
+- **The real lesson:** several further guesses (moving the garden inward,
+  clamping its `back` placement parameter) were made blind, without ever
+  getting a working screenshot of the lake fix first, compounding the
+  mistake instead of catching it. Get one working, verified screenshot after
+  the FIRST change before layering on more.
+
 ## Active plan
 
 **[Phase 3: Nephew Expansion](docs/superpowers/plans/2026-07-27-phase-3-nephew-expansion.md)**
