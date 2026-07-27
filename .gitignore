@@ -3,3 +3,15 @@ dist
 .DS_Store
 test-results
 playwright-report
+
+# Python bytecode from the Blender asset-build scripts
+__pycache__/
+*.pyc
+
+# Blender autosave backups
+*.blend1
+
+# Large regenerable art renders (turnarounds, contact sheets, preview PNGs).
+# The .blend sources and the shipped assets in public/ are what matter; these
+# are outputs of tools/build_cougar_asset*.py and can be rebuilt.
+artifacts/

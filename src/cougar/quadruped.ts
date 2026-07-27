@@ -1,179 +1,367 @@
 /**
- * A stylized-realistic cougar on four legs, built entirely from lofted
- * surfaces (see loft.ts) rather than assembled primitives.
+ * Purple Cougar's stylized cinematic hero model.
  *
- * Anatomy notes that make it read as a cat rather than a generic animal:
- *  - Long, low body: length is roughly twice the shoulder height.
- *  - Deep chest, a clear tuck-up at the waist, heavy haunches behind it.
- *  - Shoulder blades sit ABOVE the spine line on a walking cat.
- *  - Hind legs bend backwards at the hock. This is the single strongest
- *    four-legged-cat cue in a silhouette.
- *  - Tail is long, thick, and low-set — about three-quarters of body length,
- *    carried low with a slight upward kink near the base.
- *  - Small rounded head, short muzzle, small ears set wide.
- *
- * Local space: +Z is forward (the way he faces), +Y up, +X his right.
+ * The silhouette follows the supplied standing reference: a long athletic
+ * torso, powerful haunches, straight forelegs, feline rear hocks, broad paws,
+ * an expressive rounded head, and a long tail with an upturned tip.
+ * Local space is +Z forward, +Y up, +X her right.
  */
-import { Group, Mesh, type Material, type MeshStandardMaterial, Object3D, Vector3 } from 'three'
+import {
+  type BufferGeometry,
+  CircleGeometry,
+  Group,
+  Mesh,
+  type Material,
+  type MeshStandardMaterial,
+  Object3D,
+  TorusGeometry,
+  Vector3,
+} from 'three'
 import { blob, loft } from './loft'
 import type { Palette } from './materials'
 
 const V = (x: number, y: number, z: number): Vector3 => new Vector3(x, y, z)
 
 export interface Quadruped {
-  root: Group
-  /** Shoulder-to-paw chains, for posing later. */
-  legFL: Group
-  legFR: Group
-  legHL: Group
-  legHR: Group
-  neck: Group
-  head: Group
-  tail: Group
-  /** Child of the right hind paw; the cord cuffs here. */
+  root: Object3D
+  /**
+   * Rig nodes are Object3D rather than Group because glTF empty transforms
+   * load as plain Object3D instances. The procedural model still supplies
+   * Groups, which are fully compatible with this contract.
+   */
+  legFL: Object3D
+  legFR: Object3D
+  legHL: Object3D
+  legHR: Object3D
+  neck: Object3D
+  head: Object3D
+  tail: Object3D
   cuffAnchor: Object3D
-  /** World position of the cuff. Mutated in place, same object every frame. */
   cuffWorld: Vector3
   syncCuff(): void
 }
 
-/** Shoulder height at rest. Everything else is proportioned from this. */
-const SHOULDER_H = 0.74
-
-function mesh(geo: ReturnType<typeof loft>, mat: Material): Mesh {
-  const m = new Mesh(geo, mat)
-  m.castShadow = true
-  m.receiveShadow = true
-  return m
+function heroMesh(geometry: BufferGeometry, material: Material): Mesh {
+  const result = new Mesh(geometry, material)
+  result.castShadow = true
+  result.receiveShadow = true
+  return result
 }
 
-/**
- * One leg as a single continuous loft through its joints, so knee and hock
- * read as bends in one limb rather than two tubes meeting at a ball.
- */
-function buildLeg(
+function buildLimb(
   points: Vector3[],
   profile: number[],
-  mat: MeshStandardMaterial,
+  material: MeshStandardMaterial,
 ): Group {
-  const g = new Group()
-  g.add(mesh(loft({ path: points, profile, segments: 40, radial: 16 }), mat))
-  return g
+  const limb = new Group()
+  limb.add(
+    heroMesh(
+      loft({
+        path: points,
+        profile,
+        segments: 42,
+        radial: 18,
+        flatten: 1.04,
+        squash: 0.95,
+      }),
+      material,
+    ),
+  )
+  return limb
 }
 
-/** A rounded paw with four toes suggested along the front edge. */
-function buildPaw(mat: MeshStandardMaterial, dark: MeshStandardMaterial): Group {
+function buildPaw(
+  material: MeshStandardMaterial,
+  dark: MeshStandardMaterial,
+  scale = 1,
+): Group {
   const paw = new Group()
 
-  const pad = mesh(blob(0.062, 0.042, 0.075), mat)
-  pad.position.z = 0.012
-  paw.add(pad)
+  const top = heroMesh(
+    loft({
+      path: [
+        V(0, 0.018 * scale, -0.052 * scale),
+        V(0, 0.025 * scale, 0.015 * scale),
+        V(0, 0.014 * scale, 0.096 * scale),
+      ],
+      profile: [0.048 * scale, 0.082 * scale, 0.056 * scale],
+      segments: 22,
+      radial: 16,
+      capStart: true,
+      capEnd: true,
+      flatten: 1.14,
+      squash: 0.62,
+    }),
+    material,
+  )
+  paw.add(top)
 
-  for (const x of [-0.036, -0.012, 0.012, 0.036]) {
-    const toe = mesh(blob(0.016, 0.014, 0.02), dark)
-    toe.position.set(x, -0.012, 0.062)
+  for (const x of [-0.04, -0.014, 0.014, 0.04]) {
+    const toe = heroMesh(
+      blob(0.02 * scale, 0.016 * scale, 0.027 * scale),
+      material,
+    )
+    toe.position.set(x * scale, -0.002 * scale, 0.079 * scale)
     paw.add(toe)
   }
+
+  const pad = heroMesh(
+    blob(0.047 * scale, 0.009 * scale, 0.054 * scale),
+    dark,
+  )
+  pad.position.set(0, -0.031 * scale, 0.022 * scale)
+  paw.add(pad)
 
   return paw
 }
 
-function buildHead(palette: Palette): Group {
-  const head = new Group()
+function buildEar(side: number, palette: Palette): Group {
+  const ear = new Group()
+  ear.name = side < 0 ? 'leftEar' : 'rightEar'
+  ear.position.set(side * 0.136, 0.132, -0.025)
+  ear.rotation.z = -side * 0.2
+  ear.rotation.x = -0.08
 
-  // Cranium — wider than tall, flat across the brow, the way a cat's is.
-  const cranium = mesh(blob(0.105, 0.095, 0.105), palette.fur)
-  head.add(cranium)
-
-  // Muzzle: short and blunt on a cougar, sweeping down and forward.
-  const muzzle = mesh(
+  const outer = heroMesh(
     loft({
-      path: [V(0, -0.005, 0.05), V(0, -0.022, 0.11), V(0, -0.034, 0.155)],
-      profile: [0.078, 0.062, 0.045],
-      segments: 20,
-      radial: 16,
+      path: [
+        V(0, -0.022, 0),
+        V(side * 0.002, 0.012, 0.003),
+        V(side * 0.006, 0.05, 0.001),
+        V(side * 0.01, 0.085, -0.005),
+        V(side * 0.012, 0.112, -0.01),
+      ],
+      profile: [0.057, 0.062, 0.052, 0.034, 0.01],
+      segments: 28,
+      radial: 18,
       capEnd: true,
+      flatten: 0.52,
+      squash: 1,
     }),
     palette.fur,
   )
-  head.add(muzzle)
+  ear.add(outer)
 
-  // Cream muzzle patch and chin.
-  const chin = mesh(blob(0.052, 0.03, 0.05), palette.cream)
-  chin.position.set(0, -0.048, 0.115)
-  head.add(chin)
+  const inner = heroMesh(
+    loft({
+      path: [
+        V(0, -0.004, 0.03),
+        V(side * 0.002, 0.025, 0.032),
+        V(side * 0.005, 0.058, 0.027),
+        V(side * 0.007, 0.085, 0.018),
+      ],
+      profile: [0.036, 0.038, 0.026, 0.004],
+      segments: 22,
+      radial: 16,
+      capEnd: true,
+      flatten: 0.24,
+      squash: 1,
+    }),
+    palette.earInner,
+  )
+  ear.add(inner)
+  return ear
+}
 
-  // Nose leather at the tip.
-  const nose = mesh(blob(0.021, 0.016, 0.014), palette.nose)
-  nose.position.set(0, -0.018, 0.163)
-  head.add(nose)
+function buildEye(side: number, palette: Palette): Group {
+  const eye = new Group()
+  eye.name = side < 0 ? 'leftEye' : 'rightEye'
+  eye.position.set(side * 0.073, 0.038, 0.19)
 
-  for (const side of [1, -1]) {
-    // Eyes set forward and fairly high — forward-facing, like a predator.
-    // Set INTO the skull, not on it. A cat shows almost no sclera — the iris
-    // fills nearly the whole opening. Big white eyeballs sitting proud of the
-    // head is the single thing that turns a real animal into a cartoon.
-    const eye = new Group()
-    eye.position.set(side * 0.049, 0.022, 0.07)
-    eye.rotation.y = side * 0.32
-    head.add(eye)
+  const outline = heroMesh(new CircleGeometry(0.046, 28), palette.furDark)
+  outline.scale.set(0.91, 1.08, 1)
+  eye.add(outline)
 
-    const sclera = mesh(blob(0.0225, 0.019, 0.018), palette.eyeWhite)
-    eye.add(sclera)
+  const sclera = heroMesh(new CircleGeometry(0.041, 28), palette.eyeWhite)
+  sclera.scale.set(0.88, 1.05, 1)
+  sclera.position.z = 0.002
+  eye.add(sclera)
 
-    const iris = mesh(blob(0.019, 0.0175, 0.014), palette.iris)
-    iris.position.z = 0.008
-    eye.add(iris)
+  const iris = heroMesh(new CircleGeometry(0.024, 24), palette.iris)
+  iris.scale.y = 1.06
+  iris.position.set(-0.003, 0.002, 0.004)
+  eye.add(iris)
 
-    const pupil = mesh(blob(0.0065, 0.0135, 0.008), palette.pupil)
-    pupil.position.z = 0.016
-    eye.add(pupil)
+  const pupil = heroMesh(new CircleGeometry(0.009, 18), palette.pupil)
+  pupil.scale.y = 1.65
+  pupil.position.set(-0.003, 0.002, 0.006)
+  eye.add(pupil)
 
-    // Highlight — large enough to actually read at play distance.
-    const hl = mesh(blob(0.0072, 0.0072, 0.006), palette.highlight)
-    hl.position.set(-side * 0.0075, 0.008, 0.021)
-    eye.add(hl)
+  const highlight = heroMesh(new CircleGeometry(0.0055, 14), palette.highlight)
+  highlight.position.set(-0.009, 0.011, 0.008)
+  eye.add(highlight)
 
-    // Upper lid: a fur hood over the top of the eye, which is what stops it
-    // reading as a bare ball stuck to the face.
-    const lid = mesh(blob(0.026, 0.018, 0.022), palette.fur)
-    lid.position.set(side * 0.049, 0.038, 0.062)
-    head.add(lid)
+  const upperLid = heroMesh(new CircleGeometry(0.044, 24), palette.fur)
+  upperLid.scale.y = 0.45
+  upperLid.position.set(0, 0.043, 0.009)
+  upperLid.rotation.z = side * 0.08
+  eye.add(upperLid)
 
-    // Brow ridge over each eye.
-    const brow = mesh(blob(0.032, 0.011, 0.02), palette.furDark)
-    brow.position.set(side * 0.053, 0.052, 0.063)
-    head.add(brow)
+  const lowerLid = heroMesh(new CircleGeometry(0.041, 24), palette.fur)
+  lowerLid.scale.y = 0.24
+  lowerLid.position.set(0, -0.043, 0.009)
+  eye.add(lowerLid)
+  return eye
+}
 
-    // Ears: small, rounded, set wide — a cougar's are not tall triangles.
-    const ear = new Group()
-    ear.position.set(side * 0.072, 0.088, -0.012)
-    ear.rotation.z = side * 0.42
-    ear.rotation.x = -0.18
-    head.add(ear)
+function buildHead(palette: Palette): Group {
+  const head = new Group()
+  head.name = 'head'
 
-    const outer = mesh(blob(0.042, 0.05, 0.018), palette.fur)
-    ear.add(outer)
-    const inner = mesh(blob(0.028, 0.034, 0.012), palette.earInner)
-    inner.position.z = 0.014
-    ear.add(inner)
+  const cranium = heroMesh(
+    loft({
+      path: [
+        V(0, 0.015, -0.13),
+        V(0, 0.035, -0.04),
+        V(0, 0.02, 0.065),
+        V(0, -0.012, 0.145),
+      ],
+      profile: [0.105, 0.166, 0.173, 0.128],
+      segments: 38,
+      radial: 24,
+      capStart: true,
+      capEnd: true,
+      flatten: 1.13,
+      squash: 0.96,
+    }),
+    palette.fur,
+  )
+  head.add(cranium)
 
-    // Cheek ruff, which is what makes a cougar's face read as broad.
-    const cheek = mesh(blob(0.045, 0.045, 0.04), palette.fur)
-    cheek.position.set(side * 0.072, -0.022, 0.05)
+  // Broad fur cheeks taper the skull into a short cougar muzzle.
+  for (const side of [-1, 1]) {
+    const cheek = heroMesh(blob(0.052, 0.058, 0.035), palette.fur)
+    cheek.position.set(side * 0.107, -0.028, 0.066)
     head.add(cheek)
 
-    // Whiskers.
-    for (let i = 0; i < 3; i++) {
-      const droop = -0.012 * i
-      const whisker = mesh(
+    head.add(buildEye(side, palette))
+
+    const brow = heroMesh(
+      loft({
+        path: [
+          V(side * 0.026, 0.091, 0.188),
+          V(side * 0.072, 0.108, 0.185),
+          V(side * 0.118, 0.093, 0.166),
+        ],
+        profile: [0.006, 0.012, 0.005],
+        segments: 12,
+        radial: 8,
+        capStart: true,
+        capEnd: true,
+      }),
+      palette.furDark,
+    )
+    head.add(brow)
+  }
+
+  const forehead = heroMesh(blob(0.055, 0.068, 0.032), palette.fur)
+  forehead.position.set(0, 0.04, 0.105)
+  head.add(forehead)
+
+  const muzzleBase = heroMesh(
+    loft({
+      path: [
+        V(0, -0.045, 0.09),
+        V(0, -0.054, 0.15),
+        V(0, -0.054, 0.195),
+      ],
+      profile: [0.081, 0.069, 0.038],
+      segments: 24,
+      radial: 20,
+      capEnd: true,
+      flatten: 1.12,
+      squash: 0.66,
+    }),
+    palette.fur,
+  )
+  head.add(muzzleBase)
+
+  for (const side of [-1, 1]) {
+    const muzzlePad = heroMesh(blob(0.069, 0.03, 0.009), palette.cream)
+    muzzlePad.position.set(side * 0.035, -0.056, 0.211)
+    head.add(muzzlePad)
+  }
+
+  const chin = heroMesh(blob(0.045, 0.014, 0.012), palette.cream)
+  chin.position.set(0, -0.083, 0.192)
+  head.add(chin)
+
+  const noseBase = heroMesh(blob(0.04, 0.022, 0.01), palette.nose)
+  noseBase.position.set(0, -0.036, 0.21)
+  head.add(noseBase)
+
+  const noseFace = heroMesh(
+    new CircleGeometry(0.04, 3, -Math.PI / 2),
+    palette.nose,
+  )
+  noseFace.scale.set(1.25, 0.9, 1)
+  noseFace.position.set(0, -0.033, 0.222)
+  noseFace.rotation.y = 0.18
+  head.add(noseFace)
+
+  for (const x of [-0.014, 0.014]) {
+    const nostril = heroMesh(new CircleGeometry(0.004, 10), palette.furDark)
+    nostril.position.set(x, -0.032, 0.222)
+    nostril.rotation.y = 0.18
+    head.add(nostril)
+  }
+
+  for (const side of [-1, 1]) {
+    for (let dot = 0; dot < 3; dot += 1) {
+      const whiskerDot = heroMesh(new CircleGeometry(0.0018, 8), palette.furDark)
+      whiskerDot.position.set(
+        side * (0.026 + dot * 0.012),
+        -0.05 - (dot % 2) * 0.007,
+        0.214,
+      )
+      head.add(whiskerDot)
+    }
+  }
+
+  const mouthStitch = heroMesh(
+    loft({
+      path: [V(0, -0.051, 0.219), V(0, -0.075, 0.211)],
+      profile: [0.003, 0.002],
+      segments: 6,
+      radial: 5,
+      capStart: true,
+      capEnd: true,
+    }),
+    palette.furDark,
+  )
+  head.add(mouthStitch)
+
+  for (const side of [-1, 1]) {
+    const mouthCorner = heroMesh(
+      loft({
+        path: [
+          V(0, -0.068, 0.214),
+          V(side * 0.019, -0.079, 0.207),
+          V(side * 0.041, -0.074, 0.196),
+        ],
+        profile: [0.0022, 0.0018, 0.0008],
+        segments: 8,
+        radial: 5,
+        capEnd: true,
+      }),
+      palette.furDark,
+    )
+    head.add(mouthCorner)
+  }
+
+  // Three fine whiskers per side match the reference without dominating the
+  // face at desktop play distance.
+  for (const side of [-1, 1]) {
+    for (let index = 0; index < 3; index += 1) {
+      const droop = (index - 1) * 0.013
+      const whisker = heroMesh(
         loft({
           path: [
-            V(side * 0.05, -0.02 + droop, 0.13),
-            V(side * 0.12, -0.016 + droop, 0.14),
-            V(side * 0.2, -0.03 + droop, 0.13),
+            V(side * 0.056, -0.052 + droop, 0.197),
+            V(side * 0.128, -0.046 + droop, 0.202),
+            V(side * 0.204, -0.059 + droop, 0.184),
           ],
-          profile: [0.0025, 0.0018, 0.0009],
+          profile: [0.0017, 0.0011, 0.0005],
           segments: 10,
           radial: 5,
           capEnd: true,
@@ -184,169 +372,197 @@ function buildHead(palette: Palette): Group {
     }
   }
 
+  head.add(buildEar(-1, palette), buildEar(1, palette))
   return head
 }
 
 export function createQuadruped(palette: Palette): Quadruped {
   const root = new Group()
   root.name = 'cougar'
+  // Body presents a readable side silhouette while the head turns farther
+  // toward the camera, matching the primary supplied view.
+  root.rotation.y = -0.15
 
-  // --- Body: rump -> waist tuck -> deep chest -> shoulders.
-  const body = mesh(
+  const body = heroMesh(
     loft({
       path: [
-        V(0, SHOULDER_H - 0.10, -0.74),
-        V(0, SHOULDER_H - 0.04, -0.46),
-        V(0, SHOULDER_H - 0.05, -0.12),
-        V(0, SHOULDER_H - 0.02, 0.24),
-        V(0, SHOULDER_H + 0.0, 0.5),
+        V(0, 0.6, -0.79),
+        V(0, 0.67, -0.59),
+        V(0, 0.66, -0.34),
+        V(0, 0.62, -0.08),
+        V(0, 0.64, 0.19),
+        V(0, 0.67, 0.43),
+        V(0, 0.68, 0.53),
+        V(0, 0.68, 0.6),
       ],
-      // Heavy haunch, tuck at the waist, deepest at the chest, narrowing
-      // into the shoulders.
-      profile: [0.168, 0.238, 0.166, 0.228, 0.148],
-      segments: 64,
+      profile: [0.145, 0.255, 0.248, 0.225, 0.252, 0.182, 0.12, 0.06],
+      segments: 72,
       radial: 24,
+      capStart: true,
+      capEnd: true,
+      flatten: 1.06,
+      squash: 0.9,
     }),
     palette.fur,
   )
   root.add(body)
 
-  // Rump cap. The loft is deliberately left OPEN at the tail end: capping it
-  // collapses every ring to a single vertex, so all the UVs converge there and
-  // the fur texture renders as a starburst fan. A blob has sane UVs and hides
-  // the opening.
-  const rump = mesh(blob(0.172, 0.166, 0.14), palette.fur)
-  rump.position.set(0, SHOULDER_H - 0.1, -0.73)
-  root.add(rump)
-
-  // No separate shoulder/haunch blobs. Adding muscle as extra ellipsoids on
-  // top of the body puts a seam where they meet it, and better lighting only
-  // made those seams more obvious — they read as lumps stuck on his back. The
-  // volume belongs IN the body loft's own radius profile, where it is one
-  // continuous surface by construction.
-
-  // Cream underside running the length of the belly.
-  const belly = mesh(
+  const underside = heroMesh(
     loft({
       path: [
-        V(0, SHOULDER_H - 0.175, -0.46),
-        V(0, SHOULDER_H - 0.195, -0.1),
-        V(0, SHOULDER_H - 0.175, 0.26),
+        V(0, 0.455, -0.44),
+        V(0, 0.445, -0.12),
+        V(0, 0.47, 0.2),
       ],
-      profile: [0.062, 0.072, 0.066],
+      profile: [0.055, 0.074, 0.058],
       segments: 28,
       radial: 16,
       capStart: true,
       capEnd: true,
+      flatten: 1.3,
+      squash: 0.52,
     }),
     palette.cream,
   )
-  root.add(belly)
+  root.add(underside)
 
-  // --- Neck, carried low and forward as a stalking cat does.
   const neck = new Group()
-  root.add(neck)
+  neck.name = 'neck'
   neck.add(
-    mesh(
-      loft({
-        path: [V(0, SHOULDER_H + 0.0, 0.46), V(0, SHOULDER_H + 0.06, 0.62), V(0, SHOULDER_H + 0.1, 0.74)],
-        profile: [0.145, 0.125, 0.105],
-        segments: 24,
-        radial: 18,
-      }),
-      palette.fur,
-    ),
-  )
-
-  const head = buildHead(palette)
-  head.position.set(0, SHOULDER_H + 0.13, 0.8)
-  neck.add(head)
-
-  // --- Legs. Front legs are near-straight; hind legs bend back at the hock.
-  const legProfile = [0.072, 0.055, 0.04, 0.036]
-  const hindProfile = [0.098, 0.07, 0.042, 0.038]
-
-  const legFR = buildLeg(
-    [V(0.115, SHOULDER_H - 0.04, 0.28), V(0.12, 0.44, 0.25), V(0.125, 0.2, 0.28), V(0.125, 0.05, 0.3)],
-    legProfile,
-    palette.fur,
-  )
-  const legFL = buildLeg(
-    [V(-0.115, SHOULDER_H - 0.04, 0.28), V(-0.12, 0.44, 0.25), V(-0.125, 0.2, 0.28), V(-0.125, 0.05, 0.3)],
-    legProfile,
-    palette.fur,
-  )
-  // The hock: the shin runs BACKWARD from the knee before dropping to the paw.
-  const legHR = buildLeg(
-    [V(0.105, SHOULDER_H - 0.12, -0.52), V(0.115, 0.42, -0.44), V(0.12, 0.22, -0.58), V(0.12, 0.05, -0.5)],
-    hindProfile,
-    palette.fur,
-  )
-  const legHL = buildLeg(
-    [V(-0.105, SHOULDER_H - 0.12, -0.52), V(-0.115, 0.42, -0.44), V(-0.12, 0.22, -0.58), V(-0.12, 0.05, -0.5)],
-    hindProfile,
-    palette.fur,
-  )
-  root.add(legFR, legFL, legHR, legHL)
-
-  const pawPositions: Array<[Group, number, number]> = [
-    [legFR, 0.125, 0.3],
-    [legFL, -0.125, 0.3],
-    [legHR, 0.12, -0.5],
-    [legHL, -0.12, -0.5],
-  ]
-  for (const [leg, x, z] of pawPositions) {
-    const paw = buildPaw(palette.fur, palette.furDark)
-    paw.position.set(x, 0.042, z)
-    leg.add(paw)
-  }
-
-  // --- Tail: long, thick, low-set, with a kink up near the base.
-  const tail = new Group()
-  root.add(tail)
-  tail.add(
-    mesh(
+    heroMesh(
       loft({
         path: [
-          V(0, SHOULDER_H - 0.12, -0.74),
-          V(0.02, SHOULDER_H - 0.05, -0.98),
-          V(0.05, SHOULDER_H - 0.08, -1.24),
-          V(0.07, SHOULDER_H - 0.22, -1.45),
-          V(0.08, SHOULDER_H - 0.36, -1.58),
+          V(0, 0.6, 0.34),
+          V(0, 0.66, 0.45),
+          V(0, 0.72, 0.56),
+          V(0, 0.77, 0.65),
         ],
-        profile: [0.062, 0.056, 0.05, 0.044, 0.036],
-        segments: 48,
-        radial: 14,
+        profile: [0.158, 0.155, 0.135, 0.106],
+        segments: 32,
+        radial: 20,
+        flatten: 1.05,
+        squash: 0.9,
       }),
       palette.fur,
     ),
   )
-  const tailTip = mesh(
-    loft({
-      path: [V(0.08, SHOULDER_H - 0.36, -1.58), V(0.085, SHOULDER_H - 0.44, -1.64)],
-      profile: [0.036, 0.028],
-      segments: 10,
-      radial: 12,
-      capEnd: true,
-    }),
-    palette.furDark,
+  neck.add(
+    heroMesh(
+      loft({
+        path: [V(0, 0.51, 0.49), V(0, 0.61, 0.6), V(0, 0.7, 0.69)],
+        profile: [0.062, 0.071, 0.041],
+        segments: 22,
+        radial: 16,
+        capStart: true,
+        capEnd: true,
+        flatten: 1.08,
+        squash: 0.32,
+      }),
+      palette.cream,
+    ),
   )
-  tail.add(tailTip)
+  root.add(neck)
 
-  // --- The cuff, on the right hind paw, matching the real toy: a red strap
-  // with a black velcro patch.
+  const head = buildHead(palette)
+  head.position.set(0, 0.81, 0.69)
+  head.rotation.y = 0.66
+  head.scale.setScalar(1.06)
+  neck.add(head)
+
+  const frontProfile = [0.075, 0.13, 0.118, 0.098, 0.07, 0.05]
+  const legFR = buildLimb(
+    [
+      V(0.05, 0.61, 0.08),
+      V(0.14, 0.59, 0.24),
+      V(0.17, 0.5, 0.28),
+      V(0.18, 0.4, 0.31),
+      V(0.18, 0.22, 0.38),
+      V(0.18, 0.058, 0.45),
+    ],
+    frontProfile,
+    palette.fur,
+  )
+  const legFL = buildLimb(
+    [
+      V(-0.05, 0.6, 0.05),
+      V(-0.13, 0.58, 0.21),
+      V(-0.16, 0.48, 0.2),
+      V(-0.16, 0.37, 0.22),
+      V(-0.16, 0.2, 0.27),
+      V(-0.16, 0.055, 0.32),
+    ],
+    frontProfile,
+    palette.fur,
+  )
+  root.add(legFR, legFL)
+
+  const pawFR = buildPaw(palette.fur, palette.furDark, 1.05)
+  pawFR.position.set(0.18, 0.045, 0.45)
+  legFR.add(pawFR)
+  const pawFL = buildPaw(palette.fur, palette.furDark)
+  pawFL.position.set(-0.16, 0.045, 0.32)
+  legFL.add(pawFL)
+
+  const hindProfile = [0.155, 0.115, 0.064, 0.046]
+  const legHR = buildLimb(
+    [V(0.18, 0.58, -0.5), V(0.25, 0.41, -0.28), V(0.2, 0.2, -0.58), V(0.2, 0.055, -0.44)],
+    hindProfile,
+    palette.fur,
+  )
+  const legHL = buildLimb(
+    [V(-0.18, 0.58, -0.5), V(-0.25, 0.41, -0.28), V(-0.2, 0.2, -0.58), V(-0.2, 0.055, -0.44)],
+    hindProfile,
+    palette.fur,
+  )
+  root.add(legHR, legHL)
+
+  const pawHR = buildPaw(palette.fur, palette.furDark)
+  pawHR.position.set(0.2, 0.045, -0.44)
+  legHR.add(pawHR)
+  const pawHL = buildPaw(palette.fur, palette.furDark, 0.96)
+  pawHL.position.set(-0.2, 0.045, -0.44)
+  legHL.add(pawHL)
+
+  const tail = new Group()
+  tail.name = 'tail'
+  tail.add(
+    heroMesh(
+      loft({
+        path: [
+          V(0, 0.61, -0.78),
+          V(0.1, 0.57, -0.98),
+          V(0.28, 0.49, -1.18),
+          V(0.49, 0.46, -1.34),
+          V(0.68, 0.52, -1.41),
+          V(0.78, 0.64, -1.35),
+          V(0.8, 0.76, -1.24),
+        ],
+        profile: [0.074, 0.069, 0.062, 0.056, 0.051, 0.047, 0.038],
+        segments: 62,
+        radial: 16,
+        capEnd: true,
+      }),
+      palette.fur,
+    ),
+  )
+  const tailTip = heroMesh(blob(0.048, 0.052, 0.045), palette.fur)
+  tailTip.position.set(0.8, 0.76, -1.24)
+  tail.add(tailTip)
+  root.add(tail)
+
   const cuff = new Group()
-  cuff.position.set(0.12, 0.1, -0.5)
+  cuff.position.set(0.2, 0.105, -0.44)
   legHR.add(cuff)
-  const strap = mesh(blob(0.055, 0.022, 0.055), palette.cuff)
+  const strap = heroMesh(new TorusGeometry(0.052, 0.012, 8, 24), palette.cuff)
+  strap.rotation.x = Math.PI / 2
   cuff.add(strap)
-  const velcro = mesh(blob(0.026, 0.016, 0.02), palette.pupil)
-  velcro.position.set(0, 0.004, 0.045)
+  const velcro = heroMesh(blob(0.022, 0.012, 0.016), palette.pupil)
+  velcro.position.set(0, 0.002, 0.057)
   cuff.add(velcro)
 
   const cuffAnchor = new Object3D()
   cuffAnchor.name = 'cuffAnchor'
-  cuffAnchor.position.set(0, -0.01, 0.04)
+  cuffAnchor.position.set(0, -0.01, 0.046)
   cuff.add(cuffAnchor)
 
   const cuffWorld = new Vector3()

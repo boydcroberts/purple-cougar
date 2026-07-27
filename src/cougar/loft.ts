@@ -132,8 +132,14 @@ export function loft(opts: LoftOptions): BufferGeometry {
     for (let j = 0; j < radial; j++) {
       const a = i * ring + j
       const bIdx = a + ring
-      indices.push(a, bIdx, a + 1)
-      indices.push(bIdx, bIdx + 1, a + 1)
+      // Counter-clockwise seen from OUTSIDE. The frame is right-handed with
+      // n x b = t, so winding these the other way makes every triangle
+      // back-facing: three then culls the visible surface and renders the
+      // interior of the mesh instead. That is what made the character look
+      // transparent and hollow, and it also flipped every normal, so all the
+      // shading was being computed against inward-facing normals.
+      indices.push(a, a + 1, bIdx)
+      indices.push(bIdx, a + 1, bIdx + 1)
     }
   }
 

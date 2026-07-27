@@ -62,10 +62,12 @@ export const GROUND_FRICTION = 3.2
 export const ROLL_FRICTION = 0.9
 /** Below this speed on the ground, the ball is considered at rest. */
 export const REST_SPEED = 0.12
-/** Ball radius. Sized against a cougar whose shoulder stands at 0.74. */
-export const BALL_RADIUS = 0.115
+/**
+ * Ball radius, proportioned to the hind paw in the supplied reference.
+ */
+export const BALL_RADIUS = 0.11
 /** Cord length from the ankle cuff. */
-export const CORD_LENGTH = 0.85
+export const CORD_LENGTH = 0.62
 /** Hard cap, so a mashed kick cannot blow up the constraint solver. */
 export const MAX_BALL_SPEED = 14
 /** Screen-drag to world-velocity scale for a fling. */
@@ -77,3 +79,11 @@ export const FLING_SCALE = 7
  * a taut cord.
  */
 export const CONSTRAINT_ITERATIONS = 4
+
+// --- First-playable story beats ---
+/** Seconds for Purple Cougar to wake, stretch, and notice the child. */
+export const WAKE_DUR = 1.15
+/** Bounces needed to wake the nearby ramp for the first play loop. */
+export const BOUNCES_TO_RAMP = 3
+/** Seconds for the happy-call beat before free play begins. */
+export const CELEBRATE_DUR = 2.7

@@ -40,10 +40,15 @@ export interface BallPhysics {
   onGround: boolean
 }
 
-/** Ball starts lying on the grass, at rest, below and behind the anchor. */
+/** Ball starts lying on the grass, at rest, screen-right of the anchor. */
 export function createBall(anchor: Vec3): BallPhysics {
   return {
-    pos: { x: anchor.x - 0.35, y: BALL_RADIUS, z: anchor.z + 0.5 },
+    // Rest beside the cuffed hind paw, inside the shorter reference-matched
+    // tether radius. +X/-Z follows the desktop camera's right vector, giving
+    // the slack cord enough screen-space separation to stay clearly visible.
+    // Starting with slack is essential: an untouched ball must not slide merely
+    // because the constraint solver corrected its spawn.
+    pos: { x: anchor.x + 0.32, y: BALL_RADIUS, z: anchor.z - 0.24 },
     vel: { x: 0, y: 0, z: 0 },
     onGround: true,
   }

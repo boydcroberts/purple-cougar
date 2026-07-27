@@ -19,24 +19,24 @@
 import { MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, Vector2 } from 'three'
 import { canGenerateFur, createFurMaps } from './fur'
 
-const PURPLE = 0xbe9bff
+const PURPLE = 0x5a249b
 /** Points: ear backs, toe pads, tail tip, brow shadow. */
-const PURPLE_DARK = 0x7d5cc4
+const PURPLE_DARK = 0x321354
 /** Sheen tint — a cooler bloom than the base coat, so the rim reads as light
  *  catching individual hairs rather than as the body colour brightening. */
-const SHEEN_LILAC = 0xffd9f0
+const SHEEN_LILAC = 0xe8c9ff
 /** Paler underside — belly, chin, muzzle patch. */
-const CREAM = 0xf3ece0
+const CREAM = 0xd6c9d4
 /** Nose leather. */
 const NOSE_PINK = 0xc98a92
 /** Amber iris — the strongest single realism cue in a cat's face. */
 const IRIS_AMBER = 0xd9a441
 /** Inner ear. */
-const EAR_INNER = 0xd8bfb4
+const EAR_INNER = 0xc9a5c6
 /** Whiskers. */
 const WHISKER = 0xf2ece0
-// From the photo of the real toy — not free choices.
-const CUFF_RED = 0xc8202e
+/** Red cuff from the approved toy reference (PRODUCT_VISION.md). */
+const CUFF_RED = 0xb5342a
 const VELCRO_BLACK = 0x1a1a1a
 
 export interface Palette {
@@ -64,6 +64,7 @@ function furMaterial(
   sheen = 0.85,
   seed = 0x9e3779b9,
   repeat = 3,
+  uvCountershade = true,
 ): MeshPhysicalMaterial {
   // Headless (vitest) has no canvas to rasterize into. Fall back to a plain
   // tinted material rather than throwing — the maps are a visual nicety, and
@@ -79,7 +80,11 @@ function furMaterial(
     })
   }
 
-  const maps = createFurMaps(color, seed, { mottle: 0.1, spine: 0.1, belly: 0.08 })
+  const maps = createFurMaps(color, seed, {
+    mottle: uvCountershade ? 0.1 : 0.055,
+    spine: uvCountershade ? 0.1 : 0,
+    belly: uvCountershade ? 0.08 : 0,
+  })
   for (const t of [maps.albedo, maps.roughness, maps.normal]) {
     t.repeat.set(repeat, repeat)
   }
@@ -88,7 +93,10 @@ function furMaterial(
     map: maps.albedo,
     roughnessMap: maps.roughness,
     normalMap: maps.normal,
-    normalScale: new Vector2(0.38, 0.38),
+    normalScale: new Vector2(
+      uvCountershade ? 0.38 : 0.15,
+      uvCountershade ? 0.38 : 0.15,
+    ),
     roughness: 1,
     metalness: 0,
     sheen,
@@ -99,11 +107,21 @@ function furMaterial(
   })
 }
 
-export function createPalette(): Palette {
+export interface PaletteOptions {
+  /**
+   * Lofted procedural meshes share a deliberate back-to-belly UV direction.
+   * Authored smart-UV meshes do not, so their coat uses only seamless,
+   * isotropic breakup and avoids a countershade stripe on every UV island.
+   */
+  uvCountershade?: boolean
+}
+
+export function createPalette(options: PaletteOptions = {}): Palette {
+  const uvCountershade = options.uvCountershade ?? true
   return {
-    fur: furMaterial(PURPLE, 0.85, 0x9e3779b9, 2),
-    furDark: furMaterial(PURPLE_DARK, 0.6, 0x51ab3d7, 4),
-    cream: furMaterial(CREAM, 0.95, 0x2f8a1c3, 3),
+    fur: furMaterial(PURPLE, 0.85, 0x9e3779b9, 2, uvCountershade),
+    furDark: furMaterial(PURPLE_DARK, 0.6, 0x51ab3d7, 4, uvCountershade),
+    cream: furMaterial(CREAM, 0.95, 0x2f8a1c3, 3, uvCountershade),
     nose: new MeshPhysicalMaterial({
       color: NOSE_PINK,
       roughness: 0.35,
@@ -128,8 +146,17 @@ export function createPalette(): Palette {
     }),
     pupil: new MeshStandardMaterial({ color: VELCRO_BLACK, roughness: 0.08 }),
     highlight: new MeshBasicMaterial({ color: 0xffffff }),
-    earInner: furMaterial(EAR_INNER, 0.5, 0x77c1a09, 5),
+    // Ear interiors stay softly matte. A repeated fur map stretches along the
+    // tapered ear UVs and produces distracting horizontal bands.
+    earInner: new MeshPhysicalMaterial({
+      color: EAR_INNER,
+      roughness: 0.94,
+      metalness: 0,
+      sheen: 0.45,
+      sheenColor: SHEEN_LILAC,
+      sheenRoughness: 0.8,
+    }),
     whisker: new MeshStandardMaterial({ color: WHISKER, roughness: 0.5 }),
-    cuff: new MeshStandardMaterial({ color: CUFF_RED, roughness: 0.95 }),
+    cuff: new MeshStandardMaterial({ color: CUFF_RED, roughness: 0.88 }),
   }
 }
