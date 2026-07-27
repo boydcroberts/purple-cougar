@@ -22,8 +22,6 @@ export const MIN_PERIOD = 0.95
 export const RAMP_PER_CLEAR = 0.0225
 /** Orbit angle at which the cord sweeps over the free (left) foot. */
 export const THETA_PASS = Math.PI
-/** Cord length, world units. */
-export const CORD_LENGTH = 1.15
 
 // --- Bonk recovery ---
 /** How long he lies there after tripping. */
@@ -48,3 +46,27 @@ export const BALL_Y_TILT = 0.06
 // --- Progression (consumed in a later phase) ---
 /** Clears between world changes. */
 export const TRAVEL_EVERY = 10
+
+// --- Ball physics (rev 2: a real tethered particle, not a scripted orbit) ---
+/** Fixed simulation timestep. Never varies with display refresh rate. */
+export const PHYS_DT = 1 / 120
+/** Cartoon-weighted gravity; true 9.81 reads as floaty at this scale. */
+export const GRAVITY = 14
+/** Air drag, applied as exp(-AIR_DRAG * dt). */
+export const AIR_DRAG = 0.5
+/** Energy kept on a bounce, 0..1. A rubber ball on grass is fairly dead. */
+export const GROUND_RESTITUTION = 0.38
+/** Horizontal friction on impact, as exp(-k * dt). */
+export const GROUND_FRICTION = 3.2
+/** Gentler friction once it is rolling rather than skidding. */
+export const ROLL_FRICTION = 0.9
+/** Below this speed on the ground, the ball is considered at rest. */
+export const REST_SPEED = 0.12
+/** Ball radius. Sized against a cougar whose shoulder stands at 0.74. */
+export const BALL_RADIUS = 0.115
+/** Cord length from the ankle cuff. */
+export const CORD_LENGTH = 0.85
+/** Hard cap, so a mashed kick cannot blow up the constraint solver. */
+export const MAX_BALL_SPEED = 14
+/** Screen-drag to world-velocity scale for a fling. */
+export const FLING_SCALE = 7

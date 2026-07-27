@@ -18,6 +18,8 @@ export interface Stage {
   camera: PerspectiveCamera
   render(): void
   resize(): void
+  /** QA hook: orbit the camera azimuth, in degrees, around the subject. */
+  setAzimuth(deg: number): void
 }
 
 const SKY = 0x7fd0ef
@@ -80,5 +82,12 @@ export function createStage(host: HTMLElement): Stage {
     camera,
     render: () => renderer.render(scene, camera),
     resize,
+    setAzimuth(deg: number) {
+      const r = Math.hypot(camera.position.x, camera.position.z)
+      const a = (deg * Math.PI) / 180
+      camera.position.x = Math.sin(a) * r
+      camera.position.z = Math.cos(a) * r
+      camera.lookAt(0, 0.52, -0.18)
+    },
   }
 }
