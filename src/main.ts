@@ -1,14 +1,13 @@
 import { createSfx } from './audio'
 import { createBallView } from './ballView'
-import { createCougar } from './cougarStub'
+import { createPalette } from './cougar/materials'
+import { createRig } from './cougar/rig'
 import { TAU, THETA_PASS } from './constants'
 import {
   createGame,
   drainEvents,
-  hopProgress,
   step,
   tap,
-  tumbleProgress,
   type GameState,
 } from './gameplay'
 import { createStage } from './scene'
@@ -18,9 +17,9 @@ const host = document.getElementById('app')
 if (!host) throw new Error('#app missing from index.html')
 
 const stage = createStage(host)
-const cougar = createCougar()
+const rig = createRig(createPalette())
 const ballView = createBallView()
-stage.scene.add(cougar.group, ballView.group)
+stage.scene.add(rig.root, ballView.group)
 
 const hud = createHud(document.body)
 const sfx = createSfx()
@@ -80,8 +79,10 @@ function frame(now: number): void {
     }
   }
 
-  cougar.pose(hopProgress(game), tumbleProgress(game))
-  ballView.update(game.ball, cougar.ankleWorld)
+  // Poses land in a later task; for now the rig stands at rest and the cord
+  // anchors to the real cuff position rather than the retired stub's ankle.
+  rig.syncCuff()
+  ballView.update(game.ball, rig.cuffWorld)
   stage.render()
 
   requestAnimationFrame(frame)

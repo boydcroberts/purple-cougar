@@ -119,7 +119,7 @@ const SHOULDER_Y = CHEST_CENTER_Y + 0.02
  * by a ground-truth position dump, not guessed from pixels. Mounted clearly
  * outside the chest here so the arm reads as its own hanging limb.
  */
-const SHOULDER_X = 0.36
+const SHOULDER_X = 0.27
 /** Noticeably shorter and thinner than the legs — arms, not haunches. */
 const UPPER_ARM_LEN = 0.2
 const UPPER_ARM_RADIUS = 0.065
@@ -135,7 +135,7 @@ const TAIL_RADIUS = [0.105, 0.09, 0.078, 0.064, 0.05]
  * the base sets up). Cumulative sum runs well past horizontal across the
  * chain, curving the tail out and up.
  */
-const TAIL_PITCH = [0.55, 0.45, 0.4, 0.35, 0.3]
+const TAIL_PITCH = [-0.2, 0.2, 0.26, 0.3, 0.28]
 /**
  * Yaw applied only at the base (radians, local Y). Swings the whole chain's
  * plane of curl out to one side — verified against the actual rendered
@@ -145,7 +145,7 @@ const TAIL_PITCH = [0.55, 0.45, 0.4, 0.35, 0.3]
  * cuffed leg, tangling the two in silhouette. Positive here sweeps to -X,
  * the side opposite the cuff, confirmed by capture.
  */
-const TAIL_BASE_YAW = 1.3
+const TAIL_BASE_YAW = 0.8
 
 function joint(
   parent: Object3D,
@@ -232,9 +232,12 @@ export function createRig(palette: Palette): Rig {
   // --- Tail: 5 segments, base to tip, dark tip, swept clear of the body ---
   const tail: Joint[] = []
   let parent: Object3D = hips.group
+  // Base of the spine, at the back of the pelvis — NOT up at chest height.
+  // A +0.1 mount here put the tail root level with the shoulders, where it
+  // read as a stubby antenna sprouting from a shoulder blade.
   let mountX = 0
-  let mountY = 0.1
-  let mountZ = -0.22
+  let mountY = -0.06
+  let mountZ = -0.17
   for (let i = 0; i < TAIL_LEN.length; i++) {
     const length = TAIL_LEN[i]!
     const radius = TAIL_RADIUS[i]!

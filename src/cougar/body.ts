@@ -115,10 +115,13 @@ export function buildTorso(palette: Palette): Group {
   waist.castShadow = true
   torso.add(waist)
 
-  // A broad cream panel down the chest and belly — not a small oval.
+  // A cream bib down the chest and belly. It must be NARROWER than the torso
+  // so purple frames it on both sides — at 0.42 wide on a 0.48-wide torso it
+  // covered the entire front and the character read as an egg with limbs.
+  // Roughly half the torso width is the marking; any more is a belly, not a bib.
   const belly = new Mesh(new SphereGeometry(0.34, 18, 14), palette.cream)
-  belly.position.set(0, 0.08, 0.23)
-  belly.scale.set(0.62, 1.15, 0.42)
+  belly.position.set(0, 0.04, 0.13)
+  belly.scale.set(0.36, 0.82, 0.34)
   torso.add(belly)
 
   return torso
@@ -134,16 +137,29 @@ export function buildTorso(palette: Palette): Group {
 export function buildSkull(radius: number, palette: Palette): Group {
   const skull = new Group()
 
+  // Near-round, only gently flattened. Scaling y to 0.86 turned the head into
+  // a mushroom cap / beret; a cat's skull reads as a rounded box, not a disc.
   const main = new Mesh(new SphereGeometry(radius, 22, 16), palette.fur)
-  main.scale.set(1.12, 0.86, 1.0)
+  main.scale.set(1.04, 0.96, 0.98)
   main.castShadow = true
   skull.add(main)
 
-  const muzzle = new Mesh(new SphereGeometry(radius * 0.6, 16, 12), palette.fur)
-  muzzle.position.set(0, -radius * 0.32, radius * 0.68)
-  muzzle.scale.set(0.92, 0.8, 1.05)
+  // The muzzle is the single strongest "animal, not blob" cue in a silhouette
+  // — stronger than eyes. It has to genuinely PROTRUDE. At radius*0.6 sitting
+  // at z = radius*0.68 it cleared the skull by only ~0.08 units and vanished.
+  const muzzle = new Mesh(new SphereGeometry(radius * 0.66, 16, 12), palette.fur)
+  muzzle.position.set(0, -radius * 0.3, radius * 0.86)
+  muzzle.scale.set(0.98, 0.78, 1.15)
   muzzle.castShadow = true
   skull.add(muzzle)
+
+  // A brow mass across the top of the eye line. Gives the front of the head a
+  // ledge instead of a continuous curve, which is what separates a face from
+  // a ball once the eyes land on it.
+  const brow = new Mesh(new SphereGeometry(radius * 0.78, 16, 12), palette.fur)
+  brow.position.set(0, radius * 0.16, radius * 0.42)
+  brow.scale.set(1.0, 0.62, 0.72)
+  skull.add(brow)
 
   return skull
 }
