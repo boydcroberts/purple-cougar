@@ -2,6 +2,7 @@ import {
   Color,
   DirectionalLight,
   Fog,
+  HalfFloatType,
   HemisphereLight,
   Mesh,
   MeshStandardMaterial,
@@ -10,7 +11,12 @@ import {
   PlaneGeometry,
   Scene,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from 'three'
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js'
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 
 export interface Stage {
   renderer: WebGLRenderer

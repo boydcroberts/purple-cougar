@@ -17,7 +17,7 @@
  *    animals read as animals and toys read as toys.
  */
 import { MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, Vector2 } from 'three'
-import { createFurMaps } from './fur'
+import { canGenerateFur, createFurMaps } from './fur'
 
 const PURPLE = 0xbe9bff
 /** Points: ear backs, toe pads, tail tip, brow shadow. */
@@ -65,6 +65,20 @@ function furMaterial(
   seed = 0x9e3779b9,
   repeat = 3,
 ): MeshPhysicalMaterial {
+  // Headless (vitest) has no canvas to rasterize into. Fall back to a plain
+  // tinted material rather than throwing — the maps are a visual nicety, and
+  // the rig must stay constructible in tests.
+  if (!canGenerateFur()) {
+    return new MeshPhysicalMaterial({
+      color,
+      roughness: 0.92,
+      metalness: 0,
+      sheen,
+      sheenColor: SHEEN_LILAC,
+      sheenRoughness: 0.72,
+    })
+  }
+
   const maps = createFurMaps(color, seed, { mottle: 0.1, spine: 0.1, belly: 0.08 })
   for (const t of [maps.albedo, maps.roughness, maps.normal]) {
     t.repeat.set(repeat, repeat)

@@ -83,6 +83,18 @@ export interface FurMaps {
   normal: CanvasTexture
 }
 
+/**
+ * True when we can actually rasterize to a canvas. The unit tests run in bare
+ * node with no DOM, and materials must still be constructible there — a
+ * palette that throws headlessly makes the whole rig untestable.
+ */
+export function canGenerateFur(): boolean {
+  return (
+    typeof document !== 'undefined' &&
+    typeof document.createElement === 'function'
+  )
+}
+
 const SIZE = 512
 
 /**
