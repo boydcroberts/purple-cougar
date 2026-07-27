@@ -13,8 +13,8 @@ life + a garter snake/rabbit/turtle + wind/rain (Phase 4). It deliberately
 **reorders** the "Focus now" list below — read the plan's own reasoning
 before assuming the lake/squirrel items are next. **Read that plan's Status
 section before resuming** — it has corrections against what's actually in
-the repo (missing reference photo, partial Phase 2 completion) that aren't
-in the plan's original task text.
+the repo (partial Phase 2 completion, real reference photos now saved at
+`docs/reference/`) that aren't in the plan's original task text.
 
 ## Operating rule
 

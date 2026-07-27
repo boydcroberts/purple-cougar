@@ -23,15 +23,20 @@ phase text below based on what's actually in the repo right now.
   (`#8B2635`) + matte-black fuzzy velcro (`#161616`) + threaded ring spec.
   **When resuming: scope the Phase 2 SDD task to the cuff only**, not the
   full five-item list, to avoid re-doing/colliding with `d3af173`.
-- **Reference photo `IMG_3267.jpeg` is not in the repo or findable on disk.**
-  It was described to a prior session inline (likely pasted directly in
-  chat) and never saved as a file. A subagent implementer has no way to see
-  it. **Action for the owner:** drop the actual photo into
-  `docs/reference/IMG_3267.jpeg` (create the folder) before resuming Phase 2
-  cuff work or Phase 5's realism check, so both implementer and reviewer
-  subagents can actually see it. Until then, work from this plan's written
-  hex/material spec only — it's complete enough to implement against, just
-  not to visually diff against.
+- **Reference photos are now in the repo at `docs/reference/`** (added
+  2026-07-27, replacing the missing `IMG_3267.jpeg` reference): 
+  - `ball-cord-cuff.jpeg` — the actual physical toy, matches what `d3af173`
+    was tuned against. Use for the remaining cuff work (Phase 2) — note the
+    cord in this photo also shows a small dark **knot at the cuff end**
+    where the wire threads through, not just at the ball end.
+  - `lake-sunset.jpeg`, `lake-path.jpeg`, `pond.jpeg`, `daisies-lake.jpeg`,
+    `waterfall.jpeg` — Lake Lure–style water/mountain reference for the
+    Phase 4 lake work (ROADMAP.md item 1) and general "bluff looking down at
+    water" composition target.
+  - `rhododendron.jpeg`, `knockout-roses.jpeg`, `garden-ref.jpeg` — garden
+    bloom density/layering reference for Phase 4's garden-depth item.
+  Point implementer/reviewer subagents at these files directly (paths, not
+  descriptions) when their task touches ball/cuff, lake, or garden.
 - **No SDD workspace exists yet for this plan.** When resuming, use
   superpowers:subagent-driven-development, one task per phase (Phases 1-4;
   Phase 5 is a decision checkpoint for the owner, not a dispatched task —
