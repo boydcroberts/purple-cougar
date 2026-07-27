@@ -206,11 +206,18 @@ export function createQuadruped(palette: Palette): Quadruped {
       profile: [0.168, 0.238, 0.166, 0.228, 0.148],
       segments: 64,
       radial: 24,
-      capStart: true,
     }),
     palette.fur,
   )
   root.add(body)
+
+  // Rump cap. The loft is deliberately left OPEN at the tail end: capping it
+  // collapses every ring to a single vertex, so all the UVs converge there and
+  // the fur texture renders as a starburst fan. A blob has sane UVs and hides
+  // the opening.
+  const rump = mesh(blob(0.172, 0.166, 0.14), palette.fur)
+  rump.position.set(0, SHOULDER_H - 0.1, -0.73)
+  root.add(rump)
 
   // No separate shoulder/haunch blobs. Adding muscle as extra ellipsoids on
   // top of the body puts a seam where they meet it, and better lighting only

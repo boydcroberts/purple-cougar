@@ -16,7 +16,8 @@
  *    muzzle, ear backs, and tail tip. Low contrast is a large part of why real
  *    animals read as animals and toys read as toys.
  */
-import { MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial } from 'three'
+import { MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, Vector2 } from 'three'
+import { createFurMaps } from './fur'
 
 const PURPLE = 0xbe9bff
 /** Points: ear backs, toe pads, tail tip, brow shadow. */
@@ -52,11 +53,29 @@ export interface Palette {
   cuff: MeshStandardMaterial
 }
 
-/** Fur: matte body, strong sheen bloom at grazing angles. */
-function furMaterial(color: number, sheen = 0.85): MeshPhysicalMaterial {
+/**
+ * Fur: matte body, sheen bloom at grazing angles, and procedurally generated
+ * coat maps. The maps are what stop it reading as flat plastic — mottled
+ * colour breakup, a darker back grading to a paler belly, glossier guard hairs
+ * over duller undercoat, and fine normal relief for the sheen to catch.
+ */
+function furMaterial(
+  color: number,
+  sheen = 0.85,
+  seed = 0x9e3779b9,
+  repeat = 3,
+): MeshPhysicalMaterial {
+  const maps = createFurMaps(color, seed, { mottle: 0.1, spine: 0.1, belly: 0.08 })
+  for (const t of [maps.albedo, maps.roughness, maps.normal]) {
+    t.repeat.set(repeat, repeat)
+  }
   return new MeshPhysicalMaterial({
-    color,
-    roughness: 0.92,
+    color: 0xffffff, // the albedo map carries the colour now
+    map: maps.albedo,
+    roughnessMap: maps.roughness,
+    normalMap: maps.normal,
+    normalScale: new Vector2(0.38, 0.38),
+    roughness: 1,
     metalness: 0,
     sheen,
     sheenColor: SHEEN_LILAC,
@@ -68,9 +87,9 @@ function furMaterial(color: number, sheen = 0.85): MeshPhysicalMaterial {
 
 export function createPalette(): Palette {
   return {
-    fur: furMaterial(PURPLE),
-    furDark: furMaterial(PURPLE_DARK, 0.6),
-    cream: furMaterial(CREAM, 0.95),
+    fur: furMaterial(PURPLE, 0.85, 0x9e3779b9, 2),
+    furDark: furMaterial(PURPLE_DARK, 0.6, 0x51ab3d7, 4),
+    cream: furMaterial(CREAM, 0.95, 0x2f8a1c3, 3),
     nose: new MeshPhysicalMaterial({
       color: NOSE_PINK,
       roughness: 0.35,
@@ -95,7 +114,7 @@ export function createPalette(): Palette {
     }),
     pupil: new MeshStandardMaterial({ color: VELCRO_BLACK, roughness: 0.08 }),
     highlight: new MeshBasicMaterial({ color: 0xffffff }),
-    earInner: furMaterial(EAR_INNER, 0.5),
+    earInner: furMaterial(EAR_INNER, 0.5, 0x77c1a09, 5),
     whisker: new MeshStandardMaterial({ color: WHISKER, roughness: 0.5 }),
     cuff: new MeshStandardMaterial({ color: CUFF_RED, roughness: 0.95 }),
   }
