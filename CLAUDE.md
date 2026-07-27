@@ -18,6 +18,13 @@ doubt, prefer the real WNC reference over an invented shape.
 It is not a score-chasing game, an ad surface, or a tech demo. See
 [ROADMAP.md](ROADMAP.md) for what's built and what's next.
 
+**The bar for nature/scenery/beauty is high, everywhere, always** — not just
+where a plan explicitly calls it out. [docs/reference/](docs/reference/) has
+the owner's real WNC photos (lake, sky, garden, an animal cameo) as the
+visual target; it grows over time. When tuning or reviewing any scenery,
+lighting, water, or garden work, check it against those photos before
+calling it done, not against taste alone.
+
 ## Stack and commands
 
 Vite + TypeScript + vanilla three.js (~0.185). No framework, no state

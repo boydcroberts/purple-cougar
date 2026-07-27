@@ -36,7 +36,10 @@ phase text below based on what's actually in the repo right now.
   - `rhododendron.jpeg`, `knockout-roses.jpeg`, `garden-ref.jpeg` — garden
     bloom density/layering reference for Phase 4's garden-depth item.
   Point implementer/reviewer subagents at these files directly (paths, not
-  descriptions) when their task touches ball/cuff, lake, or garden.
+  descriptions) when their task touches ball/cuff, lake, or garden. Full,
+  growing index with per-photo notes: `docs/reference/README.md`. Per
+  `CLAUDE.md`, this reference bar now applies project-wide, not just to
+  this plan.
 - **No SDD workspace exists yet for this plan.** When resuming, use
   superpowers:subagent-driven-development, one task per phase (Phases 1-4;
   Phase 5 is a decision checkpoint for the owner, not a dispatched task —
