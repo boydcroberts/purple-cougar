@@ -35,8 +35,10 @@ export function createStage(host: HTMLElement): Stage {
   scene.fog = new Fog(SKY, 14, 34)
 
   const camera = new PerspectiveCamera(42, 1, 0.1, 100)
-  camera.position.set(0, 1.7, 5.4)
-  camera.lookAt(0, 1.0, 0)
+  // Low three-quarter view: a quadruped seen head-on foreshortens to nothing,
+  // hiding the body length, haunches, and tail that make him read as a cat.
+  camera.position.set(2.35, 1.02, 3.05)
+  camera.lookAt(0, 0.52, -0.18)
 
   scene.add(new AmbientLight(0xffffff, 1.15))
 

@@ -1,7 +1,7 @@
 import { createSfx } from './audio'
 import { createBallView } from './ballView'
 import { createPalette } from './cougar/materials'
-import { createRig } from './cougar/rig'
+import { createQuadruped } from './cougar/quadruped'
 import { TAU, THETA_PASS } from './constants'
 import {
   createGame,
@@ -17,7 +17,7 @@ const host = document.getElementById('app')
 if (!host) throw new Error('#app missing from index.html')
 
 const stage = createStage(host)
-const rig = createRig(createPalette())
+const rig = createQuadruped(createPalette())
 const ballView = createBallView()
 stage.scene.add(rig.root, ballView.group)
 
