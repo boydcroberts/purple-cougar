@@ -203,7 +203,7 @@ export function createQuadruped(palette: Palette): Quadruped {
       ],
       // Heavy haunch, tuck at the waist, deepest at the chest, narrowing
       // into the shoulders.
-      profile: [0.175, 0.2, 0.163, 0.204, 0.15],
+      profile: [0.168, 0.238, 0.166, 0.228, 0.148],
       segments: 64,
       radial: 24,
       capStart: true,
@@ -212,16 +212,11 @@ export function createQuadruped(palette: Palette): Quadruped {
   )
   root.add(body)
 
-  // Shoulder blades riding above the spine line.
-  for (const side of [1, -1]) {
-    const blade = mesh(blob(0.05, 0.055, 0.1), palette.fur)
-    blade.position.set(side * 0.092, SHOULDER_H + 0.012, 0.26)
-    root.add(blade)
-
-    const haunch = mesh(blob(0.098, 0.115, 0.135), palette.fur)
-    haunch.position.set(side * 0.088, SHOULDER_H - 0.09, -0.52)
-    root.add(haunch)
-  }
+  // No separate shoulder/haunch blobs. Adding muscle as extra ellipsoids on
+  // top of the body puts a seam where they meet it, and better lighting only
+  // made those seams more obvious — they read as lumps stuck on his back. The
+  // volume belongs IN the body loft's own radius profile, where it is one
+  // continuous surface by construction.
 
   // Cream underside running the length of the belly.
   const belly = mesh(

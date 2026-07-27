@@ -70,3 +70,10 @@ export const CORD_LENGTH = 0.85
 export const MAX_BALL_SPEED = 14
 /** Screen-drag to world-velocity scale for a fling. */
 export const FLING_SCALE = 7
+/**
+ * Relaxation passes over the cord + ground constraints each step. One pass in
+ * sequence is not enough: the ground clamp can shove the ball back outside the
+ * cord sphere, which happens constantly when the ball drags along the grass on
+ * a taut cord.
+ */
+export const CONSTRAINT_ITERATIONS = 4

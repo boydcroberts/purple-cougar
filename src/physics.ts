@@ -16,6 +16,7 @@
  */
 import {
   AIR_DRAG,
+  CONSTRAINT_ITERATIONS,
   BALL_RADIUS,
   CORD_LENGTH,
   GRAVITY,
@@ -132,8 +133,19 @@ export function stepBall(b: BallPhysics, anchor: Vec3, dt: number): void {
   b.pos.y += b.vel.y * dt
   b.pos.z += b.vel.z * dt
 
+  // Solve both constraints together, iteratively. Solving them once in
+  // sequence is not enough: the ground clamp pushes the ball up, which can
+  // shove it back outside the cord sphere, so it ends the step over-extended.
+  // That happens constantly in the common case of the ball dragging along the
+  // grass on a taut cord. A few relaxation passes converge to satisfying both.
+  let hit = false
+  for (let i = 0; i < CONSTRAINT_ITERATIONS; i++) {
+    solveCord(b.pos, anchor)
+    if (solveGround(b.pos)) hit = true
+  }
+  // The cord is the harder constraint of the two — a ball visibly hanging off
+  // the end of an over-long cord reads worse than one grazing the grass.
   solveCord(b.pos, anchor)
-  const hit = solveGround(b.pos)
 
   // Velocity from the corrected position. THIS is the line that lets a moving
   // cuff drag the ball around; without it the cord would only ever stop the
