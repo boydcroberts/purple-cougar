@@ -28,17 +28,22 @@ import {
   Quaternion,
   SphereGeometry,
   SRGBColorSpace,
+  TorusGeometry,
   Vector3,
 } from 'three'
 import { BALL_RADIUS, CORD_LENGTH } from './constants'
 import type { BallPhysics, Vec3 } from './physics'
 
-const BALL_ORANGE = '#e07a1f'
-const STRIPE_GREEN = '#2e8b4a'
-const CORD_BLACK = 0x232323
-const KNOT_DARK = 0x2e2e2e
+// Matched directly against the owner's physical reference toy: a matte,
+// slightly dusty pumpkin-orange rubber ball with olive-green (not
+// kelly-green) hand-painted stripes, and a near-black bent-wire loop and cord
+// rather than a soft fabric cord.
+const BALL_ORANGE = '#d1732c'
+const STRIPE_GREEN = '#5c7a3a'
+const WIRE_COLOR = 0x201f1d
+const TWO_PI = Math.PI * 2
 
-/** Orange with thin green meridian stripes — drawn, never loaded. */
+/** Orange with wavy, hand-painted-looking olive stripes — drawn, never loaded. */
 function ballTexture(): CanvasTexture {
   const c = document.createElement('canvas')
   c.width = 512
@@ -47,18 +52,32 @@ function ballTexture(): CanvasTexture {
   g.fillStyle = BALL_ORANGE
   g.fillRect(0, 0, 512, 256)
 
-  // Vertical lines in UV space wrap into rings around the ball. Thin, like
-  // the printed lines on the real toy — not wide painted bands.
+  // The reference stripes wobble as they wrap the ball rather than tracking a
+  // perfect great circle — that wobble is exactly what reads as hand-painted
+  // instead of printed. Each stripe gets its own amplitude/frequency/phase so
+  // the three don't wave in obvious lockstep.
   g.strokeStyle = STRIPE_GREEN
-  g.lineWidth = 18
+  g.lineWidth = 15
   g.lineCap = 'round'
-  for (let i = 0; i < 3; i++) {
-    const x = (i / 3) * 512 + 34
+  g.lineJoin = 'round'
+  const stripeWaves: ReadonlyArray<readonly [number, number, number]> = [
+    [17, 3.1, 0.4],
+    [13, 2.6, 2.1],
+    [19, 3.6, 4.4],
+  ]
+  for (let i = 0; i < stripeWaves.length; i++) {
+    const [amplitude, frequency, phase] = stripeWaves[i]!
+    const baseX = (i / stripeWaves.length) * 512 + 34
     g.beginPath()
-    g.moveTo(x, 0)
-    // A slight lean, so they read as curving around a sphere and not as a
-    // barcode wrapped onto one.
-    g.lineTo(x + 28, 256)
+    for (let step = 0; step <= 32; step++) {
+      const y = (step / 32) * 256
+      const wobble = Math.sin((step / 32) * TWO_PI * (frequency / 2) + phase) * amplitude
+      // The original slight overall lean, so the wobble reads as riding on
+      // top of a curve around the sphere rather than a flat squiggle.
+      const x = baseX + (step / 32) * 28 + wobble
+      if (step === 0) g.moveTo(x, y)
+      else g.lineTo(x, y)
+    }
     g.stroke()
   }
 
@@ -134,12 +153,29 @@ export function createBallView(): BallView {
   glow.visible = false
   ball.add(glow)
 
-  // The knot where the cord is tied through the top of the ball.
+  // The reference toy's cord is a real bent wire, not soft cloth cord — it
+  // holds a slight sheen and, unloaded, keeps whatever shape it was bent
+  // into. One material used for both the ball's wire loop and the cord tube,
+  // since on the real toy they are the same physical piece of wire.
+  const wireMaterial = new MeshStandardMaterial({
+    color: WIRE_COLOR,
+    roughness: 0.5,
+    metalness: 0.25,
+    side: DoubleSide,
+  })
+
+  // Where the wire is bent into a loop and set into the top of the ball. A
+  // small gap in the ring (an open arc, not a full circle) is what makes a
+  // bent wire loop read as hand-formed rather than a molded plastic grommet.
   const knot = new Mesh(
-    new SphereGeometry(BALL_RADIUS * 0.17, 10, 8),
-    new MeshStandardMaterial({ color: KNOT_DARK, roughness: 0.9 }),
+    new TorusGeometry(BALL_RADIUS * 0.22, BALL_RADIUS * 0.045, 8, 16, Math.PI * 1.7),
+    wireMaterial,
   )
-  knot.position.y = BALL_RADIUS * 0.94
+  knot.rotation.x = Math.PI / 2
+  knot.rotation.z = 0.35
+  // Proud of the surface rather than half-buried in it — a loop that mostly
+  // hides inside the sphere reads as a smudge, not a wire eye.
+  knot.position.y = BALL_RADIUS * 0.98
   ball.add(knot)
 
   // A one-pixel WebGL line vanished against the grass at desktop distance.
@@ -149,6 +185,10 @@ export function createBallView(): BallView {
   const cordSides = 6
   const cordRadius = 0.008
   const cordGeometry = new BufferGeometry()
+  // The smooth sag (pass 1) is kept separate from the final, coiled centers
+  // (pass 2) so the coil can estimate a clean tangent without feeding back on
+  // its own perturbation.
+  const cordBase = new Float32Array(cordPoints * 3)
   const cordCenters = new Float32Array(cordPoints * 3)
   const cordPositions = new Float32Array(cordPoints * cordSides * 3)
   const cordNormals = new Float32Array(cordPositions.length)
@@ -176,14 +216,7 @@ export function createBallView(): BallView {
   }
   cordGeometry.setIndex(cordIndices)
 
-  const cord = new Mesh(
-    cordGeometry,
-    new MeshStandardMaterial({
-      color: CORD_BLACK,
-      roughness: 0.9,
-      side: DoubleSide,
-    }),
-  )
+  const cord = new Mesh(cordGeometry, wireMaterial)
   cord.castShadow = true
   // Bounds would otherwise need recomputing every frame for a moving tube.
   cord.frustumCulled = false
@@ -200,6 +233,9 @@ export function createBallView(): BallView {
   const ringSide = new Vector3()
   const ringUp = new Vector3()
   const ringNormal = new Vector3()
+  const coilTangent = new Vector3()
+  const coilSide = new Vector3()
+  const coilUp = new Vector3()
   const q = new Quaternion()
   let inviting = false
   let celebration = 0
@@ -251,12 +287,51 @@ export function createBallView(): BallView {
       const t = i / (cordPoints - 1)
       const oneMinusT = 1 - t
       const offset = i * 3
-      cordCenters[offset] =
+      cordBase[offset] =
         oneMinusT * oneMinusT * from.x + 2 * oneMinusT * t * mid.x + t * t * to.x
-      cordCenters[offset + 1] =
+      cordBase[offset + 1] =
         oneMinusT * oneMinusT * from.y + 2 * oneMinusT * t * mid.y + t * t * to.y
-      cordCenters[offset + 2] =
+      cordBase[offset + 2] =
         oneMinusT * oneMinusT * from.z + 2 * oneMinusT * t * mid.z + t * t * to.z
+    }
+
+    // The reference cord is bent wire: it holds decorative loops on its own,
+    // not just a plain hanging sag. Layer an organic squiggle (two sine terms
+    // at different frequencies, not a single perfect helix) onto the smooth
+    // bezier, tapering to zero at both ends so it never detaches visually
+    // from the ball or the cuff, and growing with slack so the wire coils up
+    // when loose and straightens as it's drawn taut — same idea as a real
+    // bent-wire toy cord.
+    const coilAmplitude = Math.min(0.05, Math.max(0, slack * 0.9))
+    for (let i = 0; i < cordPoints; i++) {
+      const offset = i * 3
+      const before = Math.max(0, i - 1) * 3
+      const after = Math.min(cordPoints - 1, i + 1) * 3
+      coilTangent.set(
+        cordBase[after]! - cordBase[before]!,
+        cordBase[after + 1]! - cordBase[before + 1]!,
+        cordBase[after + 2]! - cordBase[before + 2]!,
+      )
+      if (coilTangent.lengthSq() < 1e-8) coilTangent.set(0, 0, 1)
+      else coilTangent.normalize()
+      coilSide.crossVectors(coilTangent, up)
+      if (coilSide.lengthSq() < 1e-6) coilSide.crossVectors(coilTangent, xAxis)
+      coilSide.normalize()
+      coilUp.crossVectors(coilSide, coilTangent).normalize()
+
+      const t = i / (cordPoints - 1)
+      const envelope = Math.sin(Math.PI * t) * coilAmplitude
+      const turn1 = t * TWO_PI * 3.1
+      const turn2 = t * TWO_PI * 5.3 + 1.7
+      const offSide = envelope * (0.7 * Math.sin(turn1) + 0.3 * Math.sin(turn2))
+      const offUp = envelope * (0.7 * Math.cos(turn1 * 0.9) + 0.3 * Math.cos(turn2 * 1.3 + 0.5))
+
+      cordCenters[offset] = cordBase[offset]! + coilSide.x * offSide + coilUp.x * offUp
+      cordCenters[offset + 1] = Math.max(
+        cordBase[offset + 1]! + coilSide.y * offSide + coilUp.y * offUp,
+        cordRadius + 0.002,
+      )
+      cordCenters[offset + 2] = cordBase[offset + 2]! + coilSide.z * offSide + coilUp.z * offUp
     }
 
     for (let point = 0; point < cordPoints; point++) {
