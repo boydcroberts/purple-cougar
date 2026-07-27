@@ -1,5 +1,21 @@
 # Purple Cougar Roadmap
 
+## Active plan
+
+**[Phase 3: Nephew Expansion](docs/superpowers/plans/2026-07-27-phase-3-nephew-expansion.md)**
+is drafted and not yet started. It re-targets the whole experience at the
+owner's actual nephew (dinosaurs/snakes/"scary stuff" welcome, roar should be
+loud and proud not soft) and adds: a louder roar with an open-mouth pose
+(Phase 1), finishing the ball/cord/**cuff** match to the physical reference
+toy (Phase 2 — ball/stripes/grommet/cord already shipped in `d3af173`, cuff
+still open), a streak/combo ladder up to fireworks (Phase 3), and more garden
+life + a garter snake/rabbit/turtle + wind/rain (Phase 4). It deliberately
+**reorders** the "Focus now" list below — read the plan's own reasoning
+before assuming the lake/squirrel items are next. **Read that plan's Status
+section before resuming** — it has corrections against what's actually in
+the repo (missing reference photo, partial Phase 2 completion) that aren't
+in the plan's original task text.
+
 ## Operating rule
 
 One polished system at a time, verified live in Chrome (Playwright MCP), not
