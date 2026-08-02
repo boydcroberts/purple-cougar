@@ -8,6 +8,7 @@
  * without coupling texture loading to the game loop.
  */
 import {
+  CircleGeometry,
   Color,
   DoubleSide,
   Group,
@@ -15,6 +16,7 @@ import {
   MeshBasicMaterial,
   PlaneGeometry,
   Quaternion,
+  RingGeometry,
   SRGBColorSpace,
   ShaderMaterial,
   TextureLoader,
@@ -58,6 +60,30 @@ const TRAIN_WHEEL_SOURCE_Y = 0.8
 const STEAM_PUFF_COUNT = 3
 const STEAM_CYCLE_SECONDS = 3.1
 
+// The engine's four linked drivers are a tiny part of the distant card, so
+// the running gear stays deliberately selective: a light rim, moving spokes,
+// and brass side rods only. Animating every coach bogie would read as visual
+// noise instead of a single understandable "the train is alive" cue.
+const DRIVE_WHEEL_SOURCE_CENTERS = [
+  // Pixel-checked against the purple engine's four linked driving wheels.
+  // Keeping the positions in source space protects the fit from card sizing
+  // or desktop aspect changes.
+  [0.523, 0.699],
+  [0.582, 0.699],
+  [0.644, 0.699],
+  [0.706, 0.699],
+] as const
+const REAR_DRIVE_WHEEL_SOURCE = DRIVE_WHEEL_SOURCE_CENTERS[0]
+const FRONT_DRIVE_WHEEL_SOURCE = DRIVE_WHEEL_SOURCE_CENTERS[3]
+const DRIVE_WHEEL_RADIUS_SOURCE_U = 0.041
+const DRIVE_CRANK_RADIUS_RATIO = 0.38
+const PISTON_GUIDE_U = 0.79
+const PISTON_GUIDE_V = 0.699
+const HEADLAMP_U = 0.852
+const HEADLAMP_V = 0.274
+const DEFAULT_WHEEL_REVOLUTION_SECONDS = 1.02
+const CELEBRATION_DURATION_SECONDS = 2.35
+
 const STEAM_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
 
@@ -83,6 +109,24 @@ const STEAM_FRAGMENT_SHADER = /* glsl */ `
   }
 `
 
+// A small procedural bloom avoids another raster layer while making the
+// locomotive's existing painted lamp feel warm at a distance. The glow is
+// transparent outside the circle, so it cannot turn the alpha card into a
+// rectangle under post-processing.
+const HEADLAMP_FRAGMENT_SHADER = /* glsl */ `
+  uniform vec3 tint;
+  uniform float opacity;
+  varying vec2 vUv;
+
+  void main() {
+    float radius = length(vUv - 0.5);
+    float halo = 1.0 - smoothstep(0.08, 0.5, radius);
+    float core = 1.0 - smoothstep(0.0, 0.19, radius);
+    float alpha = (halo * 0.44 + core * 0.78) * opacity;
+    gl_FragColor = vec4(tint, alpha);
+  }
+`
+
 /** The narrow interface keeps unit tests free of Image/DOM construction. */
 export interface CinematicTrainTextureLoader {
   loadAsync(url: string): Promise<Texture>
@@ -99,6 +143,44 @@ export interface CinematicTrainSteamPuff {
   readonly opacity: number
   /** Tiny screen-plane roll so the stream does not read as stamped circles. */
   readonly rotation: number
+}
+
+/** A small side-rod pose in the train card's local camera-facing plane. */
+export interface CinematicTrainRodPose {
+  /** Centre position in scene units relative to the card. */
+  readonly x: number
+  readonly y: number
+  /** Drawn bar length in scene units. */
+  readonly length: number
+  /** Counter-clockwise screen-plane rotation in radians. */
+  readonly rotation: number
+}
+
+/**
+ * Pure visual state for the locomotive's running gear. It is intentionally
+ * separate from Three objects so the mechanism can be regression-tested
+ * without a browser, texture, or renderer.
+ */
+export interface CinematicTrainMechanicalPose {
+  /** Rotation shared by the four coupled driving wheels. */
+  readonly driveWheelAngle: number
+  /** Brass coupling rod travelling with the linked driver crank pins. */
+  readonly couplingRod: CinematicTrainRodPose
+  /** Short rod running from the front driver toward the painted cylinder. */
+  readonly pistonRod: CinematicTrainRodPose
+  /** Local crank-pin offset applied to each driver-wheel centre. */
+  readonly crankOffset: Readonly<{ x: number; y: number }>
+  /** Size and alpha of the subtle warm lamp bloom. */
+  readonly headlamp: Readonly<{ scale: number; opacity: number }>
+}
+
+export interface CinematicTrainMechanicalPoseOptions {
+  /** Card width in scene units. Defaults to the shipping train size. */
+  readonly trainWidth?: number
+  /** Seconds for one driver-wheel revolution. */
+  readonly wheelRevolutionSeconds?: number
+  /** 0–1 temporary delight from a story/tap celebration. */
+  readonly celebration?: number
 }
 
 /**
@@ -162,6 +244,10 @@ export interface CinematicTrain {
   readonly image: Mesh<PlaneGeometry, MeshBasicMaterial>
   /** Soft shader puffs spawned from the painted locomotive's funnel. */
   readonly steam: Group
+  /** Selective moving drivers and brass linkage over the painted engine. */
+  readonly runningGear: Group
+  /** Soft warm bloom centered over the train's painted headlamp. */
+  readonly headlamp: Group
   readonly assetUrl: string
   /**
    * Load the authored image. Supplying a loader keeps non-browser tests DOM
@@ -175,6 +261,8 @@ export interface CinematicTrain {
   hitTest(raycaster: Raycaster): Intersection | null
   /** Align to the current camera and advance the crossing from elapsed time. */
   update(camera: Camera, elapsedSeconds: number): void
+  /** Queue a brief, non-audio "happy chug" for a tap or story beat. */
+  celebrate(): void
   /** Release only resources owned by this layer. Safe to call more than once. */
   dispose(): void
 }
@@ -198,6 +286,14 @@ interface SteamPuff {
   readonly opacityUniform: { value: number }
 }
 
+interface DriverWheelOverlay {
+  readonly rig: Group
+}
+
+interface RodOverlay {
+  readonly mesh: Mesh<PlaneGeometry, MeshBasicMaterial>
+}
+
 function finite(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback
 }
@@ -214,6 +310,93 @@ function unitLoop(value: number): number {
 function smoothstep01(value: number): number {
   const clamped = Math.min(1, Math.max(0, value))
   return clamped * clamped * (3 - 2 * clamped)
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, finite(value, 0)))
+}
+
+function sourcePointToTrainPlane(sourceU: number, sourceTopV: number, width: number): Vector3 {
+  const height = width / TRAIN_ASPECT
+  return new Vector3(
+    (sourceU - 0.5) * width,
+    (0.5 - sourceTopV) * height,
+    0,
+  )
+}
+
+function rodBetween(start: Readonly<{ x: number; y: number }>, end: Readonly<{ x: number; y: number }>): CinematicTrainRodPose {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  return {
+    x: start.x + dx * 0.5,
+    y: start.y + dy * 0.5,
+    length: Math.hypot(dx, dy),
+    rotation: Math.atan2(dy, dx),
+  }
+}
+
+function wheelRevolutionSecondsForCrossing(halfSpan: number, loopSeconds: number, width: number): number {
+  const travelSpeed = (Math.max(0.1, finite(halfSpan, 0)) * 2) / positive(loopSeconds, DEFAULT_LOOP_SECONDS)
+  const wheelCircumference = Math.PI * 2 * width * DRIVE_WHEEL_RADIUS_SOURCE_U
+  const derived = wheelCircumference / Math.max(0.1, travelSpeed)
+  // Across ordinary desktop ratios, tying wheel speed to crossing velocity
+  // makes the running gear read as mechanically driven rather than a looping
+  // sticker. The bounds only protect malformed camera/options input.
+  return Math.min(1.6, Math.max(0.48, finite(derived, DEFAULT_WHEEL_REVOLUTION_SECONDS)))
+}
+
+function celebrationEnvelope(secondsSinceStart: number): number {
+  const elapsed = finite(secondsSinceStart, Number.NEGATIVE_INFINITY)
+  if (elapsed < 0 || elapsed > CELEBRATION_DURATION_SECONDS) return 0
+  const fadeIn = smoothstep01(elapsed / 0.16)
+  const fadeOut = 1 - smoothstep01((elapsed - (CELEBRATION_DURATION_SECONDS - 0.52)) / 0.52)
+  return fadeIn * fadeOut
+}
+
+/**
+ * Samples the locomotive's selective, physically linked running gear. The
+ * artwork supplies the detailed wheels; these restrained overlays only supply
+ * parallax-free motion cues at the engine's true source positions.
+ */
+export function sampleCinematicTrainMechanicalPose(
+  elapsedSeconds: number,
+  options: CinematicTrainMechanicalPoseOptions = {},
+): CinematicTrainMechanicalPose {
+  const width = positive(options.trainWidth, CINEMATIC_TRAIN_WIDTH)
+  const cycleSeconds = positive(options.wheelRevolutionSeconds, DEFAULT_WHEEL_REVOLUTION_SECONDS)
+  const time = Math.max(0, finite(elapsedSeconds, 0))
+  const celebration = clamp01(options.celebration ?? 0)
+  const driveWheelAngle = unitLoop(time / cycleSeconds) * Math.PI * 2
+  const wheelRadius = width * DRIVE_WHEEL_RADIUS_SOURCE_U
+  const crankRadius = wheelRadius * DRIVE_CRANK_RADIUS_RATIO
+  const crankOffset = {
+    x: Math.cos(driveWheelAngle) * crankRadius,
+    y: Math.sin(driveWheelAngle) * crankRadius,
+  }
+  const rearDriver = sourcePointToTrainPlane(
+    REAR_DRIVE_WHEEL_SOURCE[0],
+    REAR_DRIVE_WHEEL_SOURCE[1],
+    width,
+  ).add(new Vector3(crankOffset.x, crankOffset.y, 0))
+  const frontDriver = sourcePointToTrainPlane(
+    FRONT_DRIVE_WHEEL_SOURCE[0],
+    FRONT_DRIVE_WHEEL_SOURCE[1],
+    width,
+  ).add(new Vector3(crankOffset.x, crankOffset.y, 0))
+  const pistonGuide = sourcePointToTrainPlane(PISTON_GUIDE_U, PISTON_GUIDE_V, width)
+  const lampBeat = 0.5 + 0.5 * Math.sin(time * 2.7 + 0.7)
+
+  return {
+    driveWheelAngle,
+    couplingRod: rodBetween(rearDriver, frontDriver),
+    pistonRod: rodBetween(frontDriver, pistonGuide),
+    crankOffset,
+    headlamp: {
+      scale: width * (0.055 + lampBeat * 0.006 + celebration * 0.012),
+      opacity: 0.098 + lampBeat * 0.026 + celebration * 0.12,
+    },
+  }
 }
 
 /**
@@ -323,9 +506,120 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
   const image = new Mesh(geometry, material)
   image.name = 'Purple excursion train image'
   image.visible = false
+  image.renderOrder = 0
   image.frustumCulled = false
   image.castShadow = false
   image.receiveShadow = false
+
+  // The picture already contains finely rendered wheels. These lightweight
+  // overlays sit exactly over the four engine drivers and move as one linked
+  // mechanism, creating a readable animation without bolting a second toy
+  // train onto the scene.
+  const runningGear = new Group()
+  runningGear.name = 'Animated locomotive running gear'
+  runningGear.position.z = 0.006
+  runningGear.visible = false
+  const driverRadius = width * DRIVE_WHEEL_RADIUS_SOURCE_U
+  const crankRadius = driverRadius * DRIVE_CRANK_RADIUS_RATIO
+  const rimGeometry = new RingGeometry(driverRadius * 0.84, driverRadius, 24)
+  const spokeGeometry = new PlaneGeometry(driverRadius * 1.52, driverRadius * 0.07)
+  const crankGeometry = new CircleGeometry(driverRadius * 0.125, 16)
+  const rodGeometry = new PlaneGeometry(1, 1)
+  const rimMaterial = new MeshBasicMaterial({
+    color: 0xe7c979,
+    transparent: true,
+    opacity: 0.29,
+    depthTest: true,
+    depthWrite: false,
+    side: DoubleSide,
+    fog: true,
+    toneMapped: false,
+  })
+  const spokeMaterial = new MeshBasicMaterial({
+    color: 0xd6b8ff,
+    transparent: true,
+    opacity: 0.2,
+    depthTest: true,
+    depthWrite: false,
+    side: DoubleSide,
+    fog: true,
+    toneMapped: false,
+  })
+  const brassMaterial = new MeshBasicMaterial({
+    color: 0xf2c76e,
+    transparent: true,
+    opacity: 0.5,
+    depthTest: true,
+    depthWrite: false,
+    side: DoubleSide,
+    fog: true,
+    toneMapped: false,
+  })
+  const driverWheels: DriverWheelOverlay[] = []
+  for (const [sourceU, sourceTopV] of DRIVE_WHEEL_SOURCE_CENTERS) {
+    const rig = new Group()
+    rig.name = 'Moving purple locomotive driver'
+    rig.position.copy(sourcePointToTrainPlane(sourceU, sourceTopV, width))
+
+    const rim = new Mesh(rimGeometry, rimMaterial)
+    rim.name = 'Driver rim shimmer'
+    rim.renderOrder = 1
+    rig.add(rim)
+
+    // Three broad paired spokes are enough to read as a rotating wheel at the
+    // train's intentionally distant size. More would moiré against the photo.
+    for (const rotation of [0, Math.PI / 3, (Math.PI * 2) / 3]) {
+      const spoke = new Mesh(spokeGeometry, spokeMaterial)
+      spoke.name = 'Driver moving spoke'
+      spoke.rotation.z = rotation
+      spoke.renderOrder = 1
+      rig.add(spoke)
+    }
+
+    const crankPin = new Mesh(crankGeometry, brassMaterial)
+    crankPin.name = 'Driver brass crank pin'
+    crankPin.position.x = crankRadius
+    crankPin.renderOrder = 2
+    rig.add(crankPin)
+    runningGear.add(rig)
+    driverWheels.push({ rig })
+  }
+
+  function createRod(name: string): RodOverlay {
+    const mesh = new Mesh(rodGeometry, brassMaterial)
+    mesh.name = name
+    mesh.renderOrder = 2
+    runningGear.add(mesh)
+    return { mesh }
+  }
+
+  const couplingRod = createRod('Animated brass coupling rod')
+  const pistonRod = createRod('Animated piston rod')
+
+  const headlamp = new Group()
+  headlamp.name = 'Warm locomotive headlamp glow'
+  headlamp.position.copy(sourcePointToTrainPlane(HEADLAMP_U, HEADLAMP_V, width))
+  headlamp.position.z = 0.014
+  headlamp.visible = false
+  const headlampGeometry = new PlaneGeometry(1, 1)
+  const headlampOpacityUniform = { value: 0 }
+  const headlampMaterial = new ShaderMaterial({
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    toneMapped: false,
+    uniforms: {
+      tint: { value: new Color(0xffdfa0) },
+      opacity: headlampOpacityUniform,
+    },
+    vertexShader: STEAM_VERTEX_SHADER,
+    fragmentShader: HEADLAMP_FRAGMENT_SHADER,
+  })
+  const headlampBloom = new Mesh(headlampGeometry, headlampMaterial)
+  headlampBloom.name = 'Animated headlamp bloom'
+  headlampBloom.renderOrder = 3
+  headlamp.add(headlampBloom)
+
   const steam = new Group()
   steam.name = 'Cinematic train steam'
   steam.visible = false
@@ -356,7 +650,7 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
     steam.add(puff)
     steamPuffs.push({ mesh: puff, material: steamMaterial, opacityUniform })
   }
-  vehicle.add(steam, image)
+  vehicle.add(steam, image, runningGear, headlamp)
 
   const cameraPosition = new Vector3()
   const cameraForward = new Vector3()
@@ -364,6 +658,8 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
   let ownedTexture: Texture | null = null
   let disposed = false
   let loadGeneration = 0
+  let celebrationRequested = false
+  let celebrationStartedAt = Number.NEGATIVE_INFINITY
 
   function installTexture(texture: Texture, ownsTexture: boolean): void {
     const previousOwnedTexture = ownedTexture
@@ -414,6 +710,14 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
     return hit
   }
 
+  function celebrate(): void {
+    if (disposed || options.reducedMotion) return
+    // The caller does not own the shared game clock, so begin on the next
+    // render tick rather than accepting a wall-clock value that could make the
+    // effect jump or run differently in a paused tab.
+    celebrationRequested = true
+  }
+
   function update(camera: Camera, elapsedSeconds: number): void {
     if (disposed) return
 
@@ -432,15 +736,69 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
       : unitLoop(Math.max(0, finite(elapsedSeconds, 0)) / loopSeconds + INITIAL_PROGRESS)
     const lateral = (motionProgress * 2 - 1) * halfSpan
     const time = Math.max(0, finite(elapsedSeconds, 0))
-    const bob = options.reducedMotion ? 0 : Math.sin(time * 2.3) * 0.022
     const requestedScreenY =
       typeof screenYSource === 'function' ? screenYSource(camera) : screenYSource
     const screenY = finite(requestedScreenY, DEFAULT_SCREEN_Y)
-    vehicle.position.set(lateral, screenY + bob, 0)
+    // The wheel contact is deliberately rigid: even a charming suspension
+    // bob makes a distant 2.5D locomotive look like it is floating above the
+    // authored railway. The gear, steam, and lamp carry all visual motion.
+    vehicle.position.set(lateral, screenY, 0)
+
+    if (options.reducedMotion) {
+      celebrationRequested = false
+      celebrationStartedAt = Number.NEGATIVE_INFINITY
+    } else if (celebrationRequested) {
+      celebrationRequested = false
+      celebrationStartedAt = time
+    }
+    const celebration = options.reducedMotion
+      ? 0
+      : celebrationEnvelope(time - celebrationStartedAt)
+    const visualReady = image.visible && material.map !== null
+    const wheelRevolutionSeconds = wheelRevolutionSecondsForCrossing(halfSpan, loopSeconds, width)
+    const mechanicalPose = sampleCinematicTrainMechanicalPose(
+      options.reducedMotion ? 0 : time,
+      { trainWidth: width, wheelRevolutionSeconds, celebration },
+    )
+
+    runningGear.visible = visualReady
+    headlamp.visible = visualReady
+    if (visualReady) {
+      for (const wheel of driverWheels) wheel.rig.rotation.z = mechanicalPose.driveWheelAngle
+
+      couplingRod.mesh.position.set(
+        mechanicalPose.couplingRod.x,
+        mechanicalPose.couplingRod.y,
+        0,
+      )
+      couplingRod.mesh.rotation.z = mechanicalPose.couplingRod.rotation
+      couplingRod.mesh.scale.set(
+        mechanicalPose.couplingRod.length,
+        Math.max(0.012, width * 0.0042),
+        1,
+      )
+
+      pistonRod.mesh.position.set(
+        mechanicalPose.pistonRod.x,
+        mechanicalPose.pistonRod.y,
+        0,
+      )
+      pistonRod.mesh.rotation.z = mechanicalPose.pistonRod.rotation
+      pistonRod.mesh.scale.set(
+        mechanicalPose.pistonRod.length,
+        Math.max(0.009, width * 0.0029),
+        1,
+      )
+
+      headlampBloom.scale.setScalar(mechanicalPose.headlamp.scale)
+      headlampOpacityUniform.value = mechanicalPose.headlamp.opacity
+    } else {
+      headlampOpacityUniform.value = 0
+    }
 
     // Steam is a motion cue, not a separate landmark. It is absent until the
     // train image is ready, then fully suppressed under reduced motion.
-    steam.visible = !options.reducedMotion && image.visible && material.map !== null
+    steam.visible = !options.reducedMotion && visualReady
     if (steam.visible) {
       for (let index = 0; index < steamPuffs.length; index++) {
         const puff = steamPuffs[index]!
@@ -449,7 +807,7 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
         puff.mesh.position.y = pose.y
         puff.mesh.scale.setScalar(pose.scale)
         puff.mesh.rotation.z = pose.rotation
-        puff.opacityUniform.value = pose.opacity
+        puff.opacityUniform.value = pose.opacity * (1 + celebration * 0.55)
       }
     }
   }
@@ -462,8 +820,19 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
     material.map = null
     image.visible = false
     steam.visible = false
+    runningGear.visible = false
+    headlamp.visible = false
     geometry.dispose()
     material.dispose()
+    rimGeometry.dispose()
+    spokeGeometry.dispose()
+    crankGeometry.dispose()
+    rodGeometry.dispose()
+    rimMaterial.dispose()
+    spokeMaterial.dispose()
+    brassMaterial.dispose()
+    headlampGeometry.dispose()
+    headlampMaterial.dispose()
     steamGeometry.dispose()
     for (const puff of steamPuffs) puff.material.dispose()
     ownedTexture?.dispose()
@@ -475,11 +844,14 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
     vehicle,
     image,
     steam,
+    runningGear,
+    headlamp,
     assetUrl,
     load,
     setTexture,
     hitTest,
     update,
+    celebrate,
     dispose,
   }
 }

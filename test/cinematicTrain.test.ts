@@ -21,6 +21,7 @@ import {
   cinematicTrainWheelContactY,
   createCinematicTrain,
   isCinematicTrainHitUv,
+  sampleCinematicTrainMechanicalPose,
   sampleCinematicTrainSteamPuff,
   type CinematicTrainTextureLoader,
 } from '../src/worlds/cinematicTrain'
@@ -96,6 +97,31 @@ describe('cinematic purple excursion train', () => {
     expect(inFlight.opacity).toBeLessThan(0.15)
   })
 
+  it('links driver wheels and rods into a restrained mechanical cycle', () => {
+    const atRest = sampleCinematicTrainMechanicalPose(0, {
+      trainWidth: 5.5,
+      wheelRevolutionSeconds: 1,
+    })
+    const quarterTurn = sampleCinematicTrainMechanicalPose(0.25, {
+      trainWidth: 5.5,
+      wheelRevolutionSeconds: 1,
+    })
+    const delighted = sampleCinematicTrainMechanicalPose(0.25, {
+      trainWidth: 5.5,
+      wheelRevolutionSeconds: 1,
+      celebration: 1,
+    })
+
+    expect(quarterTurn.driveWheelAngle).toBeCloseTo(Math.PI / 2)
+    // All coupled cranks rise together, carrying the long side rod rather
+    // than independently wobbling three overlay wheels.
+    expect(quarterTurn.couplingRod.y).toBeGreaterThan(atRest.couplingRod.y)
+    expect(quarterTurn.couplingRod.x).not.toBeCloseTo(atRest.couplingRod.x)
+    expect(quarterTurn.pistonRod.rotation).not.toBeCloseTo(atRest.pistonRod.rotation)
+    expect(delighted.headlamp.scale).toBeGreaterThan(quarterTurn.headlamp.scale)
+    expect(delighted.headlamp.opacity).toBeGreaterThan(quarterTurn.headlamp.opacity)
+  })
+
   it('constructs and follows the camera without starting a browser image load', () => {
     const train = createCinematicTrain()
     const camera = createCamera()
@@ -108,7 +134,9 @@ describe('cinematic purple excursion train', () => {
     const firstPosition = train.vehicle.position.clone()
     train.update(camera, 4)
     expect(train.vehicle.position.x).toBeGreaterThan(firstPosition.x)
-    expect(train.vehicle.position.y).not.toBe(firstPosition.y)
+    // The train can travel, but its wheel contact cannot float off the
+    // plate's photographed track.
+    expect(train.vehicle.position.y).toBe(firstPosition.y)
 
     camera.position.add(new Vector3(0.7, 0.1, -0.45))
     camera.lookAt(0, 0.43, -0.18)
@@ -166,6 +194,27 @@ describe('cinematic purple excursion train', () => {
     train.update(camera, 40)
 
     expect(train.vehicle.position).toEqual(restingPosition)
+  })
+
+  it('reveals mechanical details only with the art and gives a tap celebration a warm, bounded flourish', () => {
+    const train = createCinematicTrain()
+    const camera = createCamera()
+    train.setTexture(new Texture())
+
+    train.update(camera, 1)
+    expect(train.runningGear.visible).toBe(true)
+    expect(train.headlamp.visible).toBe(true)
+    const firstDriverAngle = train.runningGear.children[0]!.rotation.z
+
+    train.update(camera, 1.4)
+    expect(train.runningGear.children[0]!.rotation.z).not.toBeCloseTo(firstDriverAngle)
+
+    const normalBloomScale = train.headlamp.children[0]!.scale.x
+    train.celebrate()
+    train.update(camera, 1.7)
+    expect(train.headlamp.children[0]!.scale.x).toBeGreaterThan(normalBloomScale)
+
+    train.dispose()
   })
 
   it('accepts an injected loader and disposes only its internally loaded texture', async () => {

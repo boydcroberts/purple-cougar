@@ -122,4 +122,32 @@ describe('reference-matched hero driver', () => {
       ).toBeGreaterThan(0)
     }
   })
+
+  it('adds a lively torso, shoulder, and curled-tail pass without unplanting paws', () => {
+    const pose: HeroDeformationPose = {
+      ...neutralPose,
+      torsoSway: 0.62,
+      shoulderLift: 0.58,
+      tailSwing: 0.035,
+      tailCurl: -0.028,
+    }
+    const target = { x: 0, y: 0 }
+
+    deformHeroPoint(0.12, 0.18, 0.56, 0.62, pose, target)
+    expect(target.x).not.toBe(0.12)
+
+    deformHeroPoint(-0.24, 0.18, 0.365, 0.59, pose, target)
+    expect(target.y).not.toBe(0.18)
+
+    deformHeroPoint(0.6, 0.02, 0.96, 0.46, pose, target)
+    expect(target.x).not.toBe(0.6)
+    expect(target.y).not.toBe(0.02)
+
+    // The exact rear-cuff and planted-paw samples must never inherit the
+    // added body life; that keeps the ball tether visually trustworthy.
+    deformHeroPoint(0.41, -0.39, 0.722, 0.239, pose, target)
+    expect(target).toEqual({ x: 0.41, y: -0.39 })
+    deformHeroPoint(-0.2, -0.62, 0.38, 0.08, pose, target)
+    expect(target).toEqual({ x: -0.2, y: -0.62 })
+  })
 })

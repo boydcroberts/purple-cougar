@@ -58,6 +58,10 @@ export type HeroReaction = 'happy' | 'surprised' | 'roar'
 export interface HeroDeformationPose {
   /** Signed inhale/exhale amount in the range -1...1. */
   breath: number
+  /** A small shoulder-to-haunch weight transfer, normalized to -1...1. */
+  torsoSway?: number
+  /** A gentle raised-shoulder motion, normalized to -1...1. */
+  shoulderLift?: number
   /** World-space translation of the painted head region. */
   headShiftX: number
   headLift: number
@@ -65,6 +69,8 @@ export interface HeroDeformationPose {
   headRoll: number
   /** Signed bend in radians around the painted tail base. */
   tailSwing: number
+  /** A smaller counter-bend through the curled half of the tail. */
+  tailCurl?: number
   /** Independent ear rotations keep the face from reading as a still photo. */
   leftEarFlick: number
   rightEarFlick: number
@@ -172,10 +178,13 @@ interface ActiveReaction {
 
 const HERO_NEUTRAL_POSE: HeroDeformationPose = {
   breath: 0,
+  torsoSway: 0,
+  shoulderLift: 0,
   headShiftX: 0,
   headLift: 0,
   headRoll: 0,
   tailSwing: 0,
+  tailCurl: 0,
   leftEarFlick: 0,
   rightEarFlick: 0,
 }
@@ -235,6 +244,10 @@ function tailMask(u: number, v: number): number {
   return contourWeight * rootWeight
 }
 
+function finitePoseValue(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
 function rotateMasked(
   point: MutableHeroPoint,
   pivotU: number,
@@ -284,6 +297,18 @@ export function deformHeroPoint(
     (baseX - bodyPivotX) * pose.breath * bodyMask * bodyHeight * 0.006
   target.y += pose.breath * bodyMask * bodyHeight * 0.0085
 
+  // A slow weight transfer gives the planted cat a living center of gravity
+  // without moving either pair of paws. The mask is deliberately limited to
+  // the torso; carrying it onto the foreleg would make the cutout skate.
+  const torsoSway = finitePoseValue(pose.torsoSway)
+  target.x += torsoSway * bodyMask * 0.0065
+
+  // The left/front shoulder is the most readable place for a small inhale,
+  // perk, or delighted bounce. Keeping it above the elbow preserves the
+  // tether-side cuff and the strong standing silhouette from the reference.
+  const shoulderMask = ellipseMask(u, v, 0.365, 0.59, 0.145, 0.19)
+  target.y += finitePoseValue(pose.shoulderLift) * shoulderMask * 0.012
+
   // Ears move first so the head transform naturally carries them along.
   const leftEarMask = ellipseMask(u, v, 0.092, 0.842, 0.068, 0.125)
   const rightEarMask = ellipseMask(u, v, 0.267, 0.854, 0.075, 0.14)
@@ -310,7 +335,19 @@ export function deformHeroPoint(
 
   // Only the exposed tail arc bends. The haunch and cuffed rear leg remain
   // untouched even though they share the same broad image quadrant.
-  rotateMasked(target, 0.745, 0.603, pose.tailSwing, tailMask(u, v))
+  const exposedTailMask = tailMask(u, v)
+  rotateMasked(target, 0.745, 0.603, pose.tailSwing, exposedTailMask)
+  // A second, much smaller bend lands in the curled half of the tail. This
+  // avoids a rigid windshield-wiper wag while leaving the root attached to
+  // the haunch and the image's recognizable curl intact.
+  const tailTipMask = ellipseMask(u, v, 0.954, 0.46, 0.085, 0.13)
+  rotateMasked(
+    target,
+    0.89,
+    0.48,
+    finitePoseValue(pose.tailCurl),
+    exposedTailMask * tailTipMask,
+  )
 }
 
 function createContactShadow(): Mesh {
@@ -443,7 +480,14 @@ export async function loadHeroBillboard(
     tailPose ??=
       currentRigRoot.getObjectByName('cougar tailBehaviorPivot') ?? null
 
+    // The driver already owns world behavior. These tiny asynchronous rhythms
+    // merely stop its single approved picture from reading as a still card:
+    // inhale, settle into the paws, listen, then glance back toward the ball.
     const breath = Math.sin(elapsed * Math.PI * 1.04)
+    const bodySway = Math.sin(elapsed * 0.72 + 0.5)
+    const shoulderPulse = Math.sin(elapsed * 1.04 + 0.28)
+    const curiousNod = Math.sin(elapsed * 0.47 + 1.1)
+    const tailCounterWave = Math.sin(elapsed * 0.63 + 0.7)
     const combinedHeadYaw =
       (headPose?.rotation.y ?? 0) + (neckPose?.rotation.y ?? 0)
     const combinedHeadPitch =
@@ -452,14 +496,38 @@ export async function loadHeroBillboard(
       (headPose?.rotation.z ?? 0) + (neckPose?.rotation.z ?? 0)
 
     deformationPose.breath = breath
-    deformationPose.headShiftX = clamp(combinedHeadYaw * 0.03, -0.0105, 0.0105)
-    deformationPose.headLift = clamp(-combinedHeadPitch * 0.018, -0.006, 0.008)
-    deformationPose.headRoll = clamp(combinedHeadRoll * 0.32, -0.02, 0.02)
+    deformationPose.torsoSway = clamp(
+      bodySway * 0.36 + currentRigRoot.rotation.z * 4.8,
+      -0.55,
+      0.55,
+    )
+    deformationPose.shoulderLift = clamp(
+      breath * 0.38 + shoulderPulse * 0.12,
+      -0.55,
+      0.55,
+    )
+    deformationPose.headShiftX = clamp(
+      combinedHeadYaw * 0.03 + Math.sin(elapsed * 0.47 + 0.3) * 0.0028,
+      -0.0105,
+      0.0105,
+    )
+    deformationPose.headLift = clamp(
+      -combinedHeadPitch * 0.018 + curiousNod * 0.0025,
+      -0.006,
+      0.008,
+    )
+    deformationPose.headRoll = clamp(
+      combinedHeadRoll * 0.32 + Math.sin(elapsed * 0.83 + 0.9) * 0.0045,
+      -0.02,
+      0.02,
+    )
     deformationPose.tailSwing = clamp(
-      (tailPose?.rotation.y ?? Math.sin(elapsed * 1.7) * 0.08) * 0.14,
+      (tailPose?.rotation.y ?? Math.sin(elapsed * 1.7) * 0.08) * 0.14 +
+        tailCounterWave * 0.018,
       -0.05,
       0.05,
     )
+    deformationPose.tailCurl = tailCounterWave * 0.028
 
     // Narrow deterministic pulses read as independent ear flicks rather than
     // both ears mechanically rocking forever.
@@ -478,10 +546,14 @@ export async function loadHeroBillboard(
 
       if (reaction.kind === 'happy') {
         const wag = Math.sin(progress * Math.PI * 6) * envelope
+        const bounce = Math.sin(progress * Math.PI * 3) * envelope
         lift += envelope * 0.012
         roll += wag * 0.008
+        deformationPose.torsoSway = finitePoseValue(deformationPose.torsoSway) + wag * 0.42
+        deformationPose.shoulderLift = finitePoseValue(deformationPose.shoulderLift) + bounce * 0.42
         deformationPose.headRoll += wag * 0.022
         deformationPose.tailSwing += wag * 0.08
+        deformationPose.tailCurl = finitePoseValue(deformationPose.tailCurl) - wag * 0.04
         deformationPose.leftEarFlick += envelope * 0.018
         deformationPose.rightEarFlick -= envelope * 0.018
       } else if (reaction.kind === 'roar') {
@@ -496,16 +568,28 @@ export async function loadHeroBillboard(
         const tremble = Math.sin(progress * Math.PI * 26) * 0.16
         lift += punch * 0.052
         deformationPose.breath += punch * (1.5 + tremble)
+        deformationPose.torsoSway =
+          finitePoseValue(deformationPose.torsoSway) + tremble * punch * 0.24
+        deformationPose.shoulderLift =
+          finitePoseValue(deformationPose.shoulderLift) + punch * 0.68
         deformationPose.headLift += punch * 0.011
         deformationPose.headRoll += tremble * punch * 0.02
         deformationPose.tailSwing += punch * 0.075
+        deformationPose.tailCurl =
+          finitePoseValue(deformationPose.tailCurl) - tremble * punch * 0.028
         deformationPose.leftEarFlick -= punch * 0.045
         deformationPose.rightEarFlick += punch * 0.045
       } else {
+        const pop = Math.sin(Math.min(progress / 0.34, 1) * Math.PI * 0.5) *
+          (1 - progress * 0.35)
+        const amount = pop * reaction.intensity
         lift += envelope * 0.028
+        deformationPose.torsoSway = finitePoseValue(deformationPose.torsoSway) - amount * 0.22
+        deformationPose.shoulderLift = finitePoseValue(deformationPose.shoulderLift) + amount * 0.58
         deformationPose.headLift += envelope * 0.018
         deformationPose.headRoll -= envelope * 0.008
         deformationPose.tailSwing += envelope * 0.045
+        deformationPose.tailCurl = finitePoseValue(deformationPose.tailCurl) - amount * 0.03
         deformationPose.leftEarFlick -= envelope * 0.045
         deformationPose.rightEarFlick += envelope * 0.045
       }
@@ -525,6 +609,21 @@ export async function loadHeroBillboard(
         deformationPose.tailSwing,
         -0.06,
         0.06,
+      )
+      deformationPose.tailCurl = clamp(
+        finitePoseValue(deformationPose.tailCurl),
+        -0.045,
+        0.045,
+      )
+      deformationPose.torsoSway = clamp(
+        finitePoseValue(deformationPose.torsoSway),
+        -0.7,
+        0.7,
+      )
+      deformationPose.shoulderLift = clamp(
+        finitePoseValue(deformationPose.shoulderLift),
+        -0.7,
+        0.7,
       )
       deformationPose.leftEarFlick = clamp(
         deformationPose.leftEarFlick,

@@ -32,6 +32,7 @@ import {
   cinematicGardenRailHeadY,
   createCinematicEnvironment,
 } from './worlds/cinematicEnvironment'
+import { createCinematicGardenLife } from './worlds/cinematicGardenLife'
 import { createCinematicSquirrel } from './worlds/cinematicSquirrel'
 import {
   CINEMATIC_TRAIN_DISTANCE,
@@ -110,6 +111,7 @@ reducedMotionQuery?.addEventListener('change', (event) => {
 })
 
 const cinematicEnvironment = useCinematicScenery ? createCinematicEnvironment() : null
+const cinematicGardenLife = useCinematicScenery ? createCinematicGardenLife() : null
 const cinematicTrain = useCinematicScenery
   ? createCinematicTrain({
       // Keep this as a live getter instead of spreading `motion`: the OS
@@ -135,9 +137,12 @@ const cinematicButterfly = useCinematicScenery ? createCinematicButterfly(motion
 let cinematicSceneryReady = false
 let cinematicSquirrelActivated = false
 let cinematicButterflyActivated = false
+let cinematicEnvironmentFading = false
+let hasStartedPlaying = false
 
 function syncCinematicCardVisibility(): void {
   if (!useCinematicScenery) return
+  cinematicGardenLife!.root.visible = cinematicSceneryReady
   cinematicTrain!.root.visible = cinematicSceneryReady
   cinematicSquirrel!.root.visible = cinematicSceneryReady && cinematicSquirrelActivated
   cinematicButterfly!.root.visible = cinematicSceneryReady && cinematicButterflyActivated
@@ -150,6 +155,7 @@ if (useCinematicScenery) {
   syncCinematicCardVisibility()
   stage.scene.add(
     cinematicEnvironment!.root,
+    cinematicGardenLife!.root,
     cinematicTrain!.root,
     cinematicSquirrel!.root,
     cinematicButterfly!.root,
@@ -216,6 +222,15 @@ reducedMotionQuery?.addEventListener('change', (event) => {
   ui.setReducedMotion(event.matches)
 })
 const sfx = createSfx()
+
+function refreshExplorationControl(): void {
+  // The learning button only represents the world that is actually visible.
+  // A slow or failed garden texture must not produce facts about scenery the
+  // child cannot see behind the reliable procedural fallback.
+  ui.setExplorationEnabled(
+    hasStartedPlaying && (!useCinematicScenery || cinematicSceneryReady),
+  )
+}
 
 if (!useCinematicScenery) {
   // Keep the prior procedural world reachable for visual comparison without
@@ -459,7 +474,8 @@ function handleStoryEvents(events: readonly PlayEvent[]): void {
         ballView.setInviting(false)
         behavior.setMood('excited', 0.2)
         reactCougar('surprised', 0.8)
-        ui.setExplorationEnabled(true)
+        hasStartedPlaying = true
+        refreshExplorationControl()
         if (useCinematicScenery && !cinematicSquirrelActivated) {
           cinematicSquirrelActivated = true
           // Its first run belongs to the discoverable world, not the inactive
@@ -475,6 +491,7 @@ function handleStoryEvents(events: readonly PlayEvent[]): void {
         sfx.bounce()
         ui.showBounce(event.count)
         reactCougar(event.count >= 3 ? 'happy' : 'surprised', 0.72)
+        cinematicGardenLife?.burst(elapsed)
         break
       case 'ramp-ready':
         rampReadyAt = elapsed
@@ -500,9 +517,12 @@ function handleStoryEvents(events: readonly PlayEvent[]): void {
         window.setTimeout(() => reactCougar('happy', 1.25), 1150)
         ballView.celebrate()
         ui.celebrate()
+        cinematicGardenLife?.burst(elapsed)
+        cinematicTrain?.celebrate()
         break
       case 'train-tease':
         behavior.setMood('curious', 0.5)
+        cinematicTrain?.celebrate()
         ui.announce('Purple Mountain Express is rolling through the mountains.')
         break
     }
@@ -528,6 +548,24 @@ const cameraRight = new Vector3()
 const cameraToward = new Vector3()
 let lastButterflyDiscoveryAt = Number.NEGATIVE_INFINITY
 let gardenDiscoveryCursor = 0
+const EXPLORE_DISCOVERIES = [
+  ...GARDEN_DISCOVERIES,
+  {
+    commonName: 'Purple Mountain Express',
+    botanicalName: 'Steam excursion train',
+    fact: 'Steam pushes the pistons, and the pistons turn the train wheels.',
+  },
+  {
+    commonName: 'Eastern tiger swallowtail',
+    botanicalName: 'Papilio glaucus',
+    fact: 'A butterfly tastes with its feet before it sips nectar from a flower.',
+  },
+  {
+    commonName: 'Brevard white squirrel',
+    botanicalName: 'Sciurus carolinensis (white morph)',
+    fact: 'A squirrel uses its big fluffy tail to balance while it leaps.',
+  },
+] as const
 
 function canExploreWorld(): boolean {
   const phase = story.snapshot().phase
@@ -662,6 +700,7 @@ function tryCinematicWorldTap(clientX: number, clientY: number): boolean {
     case 'train':
       sfx.whistle()
       behavior.setMood('curious', 0.45)
+      cinematicTrain?.celebrate()
       ui.showDiscovery(
         'Purple Mountain Express',
         'Steam excursion train',
@@ -677,11 +716,15 @@ function tryCinematicWorldTap(clientX: number, clientY: number): boolean {
 }
 
 function exploreNextGardenFact(): void {
-  if (!canExploreWorld()) {
+  if (!hasStartedPlaying || !canExploreWorld()) {
     ui.announce('Play with Purple Cougar and the ball first.')
     return
   }
-  const discovery = GARDEN_DISCOVERIES[gardenDiscoveryCursor % GARDEN_DISCOVERIES.length]
+  if (useCinematicScenery && !cinematicSceneryReady) {
+    ui.announce('The garden is still waking up. Keep playing with the ball!')
+    return
+  }
+  const discovery = EXPLORE_DISCOVERIES[gardenDiscoveryCursor % EXPLORE_DISCOVERIES.length]
   if (!discovery) return
   gardenDiscoveryCursor += 1
   behavior.setMood('curious', 0.22)
@@ -701,6 +744,10 @@ function targetsInteractiveControl(target: EventTarget | null): boolean {
 let downAt: { x: number; y: number; pointerId: number } | null = null
 
 host.addEventListener('pointerdown', (event) => {
+  // One clear gesture is more forgiving than trying to merge two tiny hands
+  // into the same tether throw. Ignoring secondary touches also prevents a
+  // second finger from overwriting the first pointer's pending release.
+  if (!event.isPrimary) return
   if (event.pointerType === 'mouse' && event.button !== 0) return
   if (targetsInteractiveControl(event.target)) return
   sfx.unlock()
@@ -713,6 +760,7 @@ host.addEventListener('pointerdown', (event) => {
 })
 
 host.addEventListener('pointerup', (event) => {
+  if (!event.isPrimary) return
   if (!downAt || downAt.pointerId !== event.pointerId) return
   const dx = event.clientX - downAt.x
   const dy = event.clientY - downAt.y
@@ -731,6 +779,7 @@ host.addEventListener('pointerup', (event) => {
 })
 
 host.addEventListener('pointercancel', (event) => {
+  if (!event.isPrimary) return
   if (downAt?.pointerId === event.pointerId) downAt = null
 })
 host.addEventListener('lostpointercapture', () => {
@@ -818,12 +867,22 @@ function frame(now: number): void {
   camera.update(frameDt, { x: 0, y: 0.52, z: -0.18 }, ball.pos, speed(ball))
   if (useCinematicScenery) {
     cinematicEnvironment!.update(stage.camera, elapsed, motion.reducedMotion)
+    const plateIsFading =
+      cinematicEnvironment!.plate.visible && !cinematicEnvironment!.isFullyVisible()
+    if (plateIsFading !== cinematicEnvironmentFading) {
+      cinematicEnvironmentFading = plateIsFading
+      stage.setCinematicEnvironmentFading(plateIsFading)
+    }
     if (!cinematicSceneryReady && cinematicEnvironment!.isFullyVisible()) {
+      stage.setCinematicEnvironmentFading(false)
+      cinematicEnvironmentFading = false
       stage.setCinematicEnvironmentMode(true)
       cinematicSceneryReady = true
       syncCinematicCardVisibility()
+      refreshExplorationControl()
     }
     cinematicTrain!.update(stage.camera, elapsed)
+    cinematicGardenLife!.update(stage.camera, elapsed, motion.reducedMotion)
     cinematicSquirrel!.update(stage.camera, elapsed, motion.reducedMotion)
     cinematicButterfly!.update(stage.camera, elapsed)
   } else {

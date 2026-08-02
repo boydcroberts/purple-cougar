@@ -41,6 +41,11 @@ export interface Stage {
    * plate is providing the visible environment.
    */
   setCinematicEnvironmentMode(enabled: boolean): void
+  /**
+   * Keep the fallback meadow's colour during the scenic-plate crossfade without
+   * letting its opaque depth buffer block the partially transparent plate.
+   */
+  setCinematicEnvironmentFading(fading: boolean): void
   /** QA hook: orbit the camera azimuth, in degrees, around the subject. */
   setAzimuth(deg: number): void
 }
@@ -162,15 +167,13 @@ export function createStage(host: HTMLElement): Stage {
   scene.add(rim)
 
   const meadowTexture = makeMeadowTexture(60)
-  const ground = new Mesh(
-    new PlaneGeometry(60, 60),
-    new MeshStandardMaterial({
-      color: meadowTexture ? 0xffffff : GRASS,
-      map: meadowTexture,
-      roughness: 1,
-      metalness: 0,
-    }),
-  )
+  const groundMaterial = new MeshStandardMaterial({
+    color: meadowTexture ? 0xffffff : GRASS,
+    map: meadowTexture,
+    roughness: 1,
+    metalness: 0,
+  })
+  const ground = new Mesh(new PlaneGeometry(60, 60), groundMaterial)
   ground.rotation.x = -Math.PI / 2
   ground.receiveShadow = true
   scene.add(ground)
@@ -272,6 +275,17 @@ export function createStage(host: HTMLElement): Stage {
     setCinematicEnvironmentMode(enabled) {
       skyDome.visible = !enabled
       ground.visible = !enabled
+      // Reset this in both directions so a failed/retried scenic load cannot
+      // leave the procedural fallback with depth writing unexpectedly disabled.
+      groundMaterial.depthWrite = true
+    },
+    setCinematicEnvironmentFading(fading) {
+      // Opaque scene objects render before transparent ones. During the plate's
+      // short fade, retaining the meadow's colour but dropping its depth write
+      // lets the authored landscape blend over it instead of popping in only
+      // after the old ground disappears. Near actors still write depth, so the
+      // plate stays behind Purple Cougar and the ball.
+      groundMaterial.depthWrite = !fading
     },
     setAzimuth(deg: number) {
       const r = Math.hypot(camera.position.x, camera.position.z)

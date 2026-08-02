@@ -67,7 +67,7 @@ export function createPlayUi(host: HTMLElement): PlayUi {
   const discoveryTitle = document.createElement('strong')
   Object.assign(discoveryTitle.style, {
     display: 'block',
-    fontSize: '14px',
+    fontSize: '15px',
     lineHeight: '1.1',
     letterSpacing: '0.01em',
   } satisfies Partial<CSSStyleDeclaration>)
@@ -89,7 +89,7 @@ export function createPlayUi(host: HTMLElement): PlayUi {
     display: 'block',
     marginTop: '5px',
     color: '#fffaf0',
-    fontSize: '12px',
+    fontSize: '13px',
     fontWeight: '600',
     lineHeight: '1.3',
   } satisfies Partial<CSSStyleDeclaration>)
@@ -97,7 +97,8 @@ export function createPlayUi(host: HTMLElement): PlayUi {
 
   const sound = document.createElement('button')
   sound.type = 'button'
-  sound.setAttribute('aria-label', 'Sound on')
+  sound.setAttribute('aria-label', 'Mute sound')
+  sound.setAttribute('aria-pressed', 'false')
   sound.textContent = '🔊'
   Object.assign(sound.style, {
     position: 'fixed',
@@ -151,7 +152,8 @@ export function createPlayUi(host: HTMLElement): PlayUi {
   sound.addEventListener('click', () => {
     muted = !muted
     sound.textContent = muted ? '🔇' : '🔊'
-    sound.setAttribute('aria-label', muted ? 'Sound off' : 'Sound on')
+    sound.setAttribute('aria-label', muted ? 'Unmute sound' : 'Mute sound')
+    sound.setAttribute('aria-pressed', String(muted))
     soundListener?.(muted)
   })
   explore.addEventListener('click', () => {
@@ -189,14 +191,14 @@ export function createPlayUi(host: HTMLElement): PlayUi {
       discovery.setAttribute('aria-hidden', 'false')
       discovery.style.opacity = '1'
       discovery.style.transform = 'translate(0, 0) scale(1)'
-      announce(`${title}. ${fact}`)
+      announce(`${title}. ${detail}. ${fact}`)
       if (discoveryTimer !== null) window.clearTimeout(discoveryTimer)
       discoveryTimer = window.setTimeout(() => {
         discovery.style.opacity = '0'
         discovery.style.transform = 'translate(0, 10px) scale(0.98)'
         discovery.setAttribute('aria-hidden', 'true')
         discoveryTimer = null
-      }, 2600)
+      }, 3800)
     },
     setExplorationEnabled(enabled) {
       explore.disabled = !enabled
@@ -215,7 +217,8 @@ export function createPlayUi(host: HTMLElement): PlayUi {
     setSoundMuted(nextMuted) {
       muted = nextMuted
       sound.textContent = muted ? '🔇' : '🔊'
-      sound.setAttribute('aria-label', muted ? 'Sound off' : 'Sound on')
+      sound.setAttribute('aria-label', muted ? 'Unmute sound' : 'Mute sound')
+      sound.setAttribute('aria-pressed', String(muted))
     },
     onSoundToggle(listener) {
       soundListener = listener
