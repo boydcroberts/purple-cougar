@@ -29,6 +29,27 @@ function hash2(ix: number, iy: number): number {
 }
 
 /**
+ * Each period's lattice, hashed once. The tile only ever samples `period ×
+ * period` distinct corners, but the pixel loop asks for four of them per octave
+ * per pixel — hashing on demand meant ~5M Math.sin calls blocking first paint
+ * (87ms on a desktop Mac, several times that on the iPad this is played on).
+ * The values are the same either way.
+ */
+const lattices = new Map<number, Float64Array>()
+
+function lattice(period: number): Float64Array {
+  let table = lattices.get(period)
+  if (!table) {
+    table = new Float64Array(period * period)
+    for (let j = 0; j < period; j++) {
+      for (let i = 0; i < period; i++) table[j * period + i] = hash2(i, j)
+    }
+    lattices.set(period, table)
+  }
+  return table
+}
+
+/**
  * Smoothed value noise in 0..1 that repeats every `period` lattice cells, so
  * the tile wraps seamlessly. Without the wrap the ground shows a hard grid seam
  * everywhere the texture repeats.
@@ -40,12 +61,15 @@ function periodicNoise2(x: number, y: number, period: number): number {
   const fy = y - iy
   const ux = fx * fx * (3 - 2 * fx)
   const uy = fy * fy * (3 - 2 * fy)
-  const at = (i: number, j: number) =>
-    hash2(((i % period) + period) % period, ((j % period) + period) % period)
-  const a = at(ix, iy)
-  const b = at(ix + 1, iy)
-  const c = at(ix, iy + 1)
-  const d = at(ix + 1, iy + 1)
+  const table = lattice(period)
+  const x0 = ((ix % period) + period) % period
+  const y0 = ((iy % period) + period) % period
+  const x1 = (x0 + 1) % period
+  const y1 = (y0 + 1) % period
+  const a = table[y0 * period + x0]!
+  const b = table[y0 * period + x1]!
+  const c = table[y1 * period + x0]!
+  const d = table[y1 * period + x1]!
   return (a * (1 - ux) + b * ux) * (1 - uy) + (c * (1 - ux) + d * ux) * uy
 }
 

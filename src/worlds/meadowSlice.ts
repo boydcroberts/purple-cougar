@@ -75,6 +75,12 @@ export interface MeadowRamp {
 export interface MeadowSliceOptions {
   /** Stable layout seed. Omit it for the shipped meadow composition. */
   readonly seed?: number
+  /**
+   * Hold the ambient meadow still: grass sway, butterflies, and the distant
+   * train. The bell still swings and rings — that one is a direct answer to
+   * the child's own throw, not decoration.
+   */
+  readonly reducedMotion?: boolean
 }
 
 export interface MeadowSlice {
@@ -787,18 +793,21 @@ export function createMeadowSlice(options: MeadowSliceOptions = {}): MeadowSlice
     if (disposed) return null
     const elapsed = finite(elapsedSeconds)
     const delta = clamp(finite(deltaSeconds), 0, 0.1)
+    // Ambient dressing reads off `time`; anything the child caused reads off
+    // `elapsed`/`delta` so it keeps answering under reduced motion.
+    const time = options.reducedMotion ? 0 : elapsed
 
     for (const sway of swaying) {
-      sway.node.rotation.z = Math.sin(elapsed * 1.25 + sway.phase) * sway.amount
-      sway.node.rotation.x = Math.cos(elapsed * 0.92 + sway.phase * 0.73) * sway.amount * 0.25
+      sway.node.rotation.z = Math.sin(time * 1.25 + sway.phase) * sway.amount
+      sway.node.rotation.x = Math.cos(time * 0.92 + sway.phase * 0.73) * sway.amount * 0.25
     }
 
     // Butterflies: slow lissajous wanders above the flower ring, each facing
     // its direction of travel, wings flapping fast the way small wings do,
     // with a light bounce synced to the downstroke.
     for (const flier of butterflies) {
-      const flight = elapsed * 0.5 + flier.phase
-      const flapPhase = (elapsed + flier.phase) * 9.5
+      const flight = time * 0.5 + flier.phase
+      const flapPhase = (time + flier.phase) * 9.5
       // The wander is pushed into the far half of the meadow, away from the
       // camera resting near (1.7, 1.84). A butterfly that drifts within ~2m of
       // the lens stops reading as an insect and becomes a pink slab filling
@@ -825,20 +834,20 @@ export function createMeadowSlice(options: MeadowSliceOptions = {}): MeadowSlice
     // Slow enough that a portrait view never becomes a distracting whip-pan.
     const TRAIN_SPAN = 8.6
     const TRAIN_SPEED = 0.85
-    distantTrain.vehicle.position.x = ((elapsed * TRAIN_SPEED) % (TRAIN_SPAN * 2)) - TRAIN_SPAN
+    distantTrain.vehicle.position.x = ((time * TRAIN_SPEED) % (TRAIN_SPAN * 2)) - TRAIN_SPAN
     // Tiny bob only — anything larger visibly lifts the rims off the rails.
-    distantTrain.vehicle.position.y = 0.2 + Math.sin(elapsed * 1.24) * 0.006
+    distantTrain.vehicle.position.y = 0.2 + Math.sin(time * 1.24) * 0.006
     for (const wheel of distantTrain.wheels) {
       // The cylinder is tilted onto its axle by rotation.x, so the rolling
       // spin must go on the local axis (rotation.y) — animating rotation.z
       // flips the disc end-over-end instead. Angular speed is v / r so the
       // rims genuinely roll along the rails rather than spinning at a
       // disconnected rate.
-      wheel.rotation.y = -(TRAIN_SPEED / 0.155) * elapsed
+      wheel.rotation.y = -(TRAIN_SPEED / 0.155) * time
     }
     for (let puff = 0; puff < distantTrain.smoke.length; puff++) {
       const cloud = distantTrain.smoke[puff]!
-      const floatPhase = elapsed * 0.7 + puff * 0.85
+      const floatPhase = time * 0.7 + puff * 0.85
       // Puffs trail behind the chimney and climb as they age — smoke hanging
       // motionless above a travelling engine reads as a sticker, a drifting
       // wake reads as motion.

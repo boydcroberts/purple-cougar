@@ -104,25 +104,40 @@ if (forceProcedural) {
   }
 }
 
+// Every world module already honours `reducedMotion`, but nothing had ever set
+// it — the option was wired end to end and never switched on. Read the OS
+// setting and share ONE mutable object with all of them: the modules re-read
+// `options.reducedMotion` each update, so flipping the field mid-session takes
+// effect on the next frame without a reload.
+const motion = { reducedMotion: false }
+const reducedMotionQuery =
+  typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null
+motion.reducedMotion = reducedMotionQuery?.matches === true
+reducedMotionQuery?.addEventListener('change', (event) => {
+  motion.reducedMotion = event.matches
+})
+
 const behavior = createCougarBehavior(cougar, {
   initialMood: 'calm',
   neckPivot: { x: 0, y: 0.62, z: 0.34 },
   tailPivot: { x: 0, y: 0.61, z: -0.75 },
 })
 const ballView = createBallView()
-const meadow = createMeadowSlice()
-const backdrop = createParkBackdrop()
+const meadow = createMeadowSlice(motion)
+const backdrop = createParkBackdrop(motion)
 const roarRings = createRoarRings()
 // Western North Carolina dressing: tall natives framing the view, a laid stone
 // walk through the beds, and the Brevard white squirrel who bolts across every
 // so often.
-const trees = createWncTrees()
-const garden = createWncGarden()
-const stonePath = createStonePath()
-const squirrel = createWhiteSquirrel()
+const trees = createWncTrees(motion)
+const garden = createWncGarden(motion)
+const stonePath = createStonePath(motion)
+const squirrel = createWhiteSquirrel(motion)
 // Near-camera grass framing the bottom corners; see the module header for why
 // its positions are measured rather than authored.
-const foregroundFringe = createForegroundFringe()
+const foregroundFringe = createForegroundFringe(motion)
 stage.scene.add(
   backdrop.root,
   trees.root,

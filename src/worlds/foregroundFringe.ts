@@ -85,7 +85,6 @@ export function createForegroundFringe(
   root.userData.kind = 'foreground-fringe'
 
   const random = makeRng(options.seed ?? DEFAULT_SEED)
-  const reducedMotion = options.reducedMotion === true
 
   // Foreground foliage this close to the lens is backlit by the low sun, so it
   // reads as a dark frame rather than as more bright meadow. That contrast is
@@ -159,7 +158,9 @@ export function createForegroundFringe(
   }
 
   function update(elapsedSeconds: number): void {
-    if (reducedMotion) return
+    // Read the flag per frame, like every other world module, so the caller can
+    // answer an OS reduced-motion change without a reload.
+    if (options.reducedMotion) return
     for (const blade of swaying) {
       const wave = Math.sin(elapsedSeconds * 1.15 + blade.phase)
       blade.node.rotation.x = blade.baseTiltX + wave * blade.amount

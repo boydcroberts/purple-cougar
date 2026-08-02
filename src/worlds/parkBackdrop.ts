@@ -758,6 +758,8 @@ export function createParkBackdrop(options: ParkBackdropOptions = {}): ParkBackd
   let animationTime = 0
   let lastElapsed = 0
   let disposed = false
+  /** True once the still (reduced-motion) lake surface has been written. */
+  let lakeSettled = false
 
   function update(elapsedSeconds: number, deltaSeconds: number): void {
     if (disposed) return
@@ -786,16 +788,22 @@ export function createParkBackdrop(options: ParkBackdropOptions = {}): ParkBackd
     // Slow crossing swells on the lake. Vertical displacement only — a still
     // mirror looks like painted glass, and anything faster than this reads as
     // an ocean rather than a sheltered mountain lake.
-    for (let index = 0; index < lakePositions.count; index++) {
-      const x = lakeRest[index * 3]!
-      const y = lakeRest[index * 3 + 1]!
-      lakePositions.setZ(
-        index,
-        Math.sin(x * 0.55 + time * 0.5) * 0.035 + Math.cos(y * 0.8 - time * 0.36) * 0.025,
-      )
+    // Under reduced motion `time` is pinned to 0, so the swell solves to the
+    // same surface every frame. Skip it once it has been laid down rather than
+    // paying for 627 vertices plus a full normal recompute per frame forever.
+    if (!options.reducedMotion || !lakeSettled) {
+      for (let index = 0; index < lakePositions.count; index++) {
+        const x = lakeRest[index * 3]!
+        const y = lakeRest[index * 3 + 1]!
+        lakePositions.setZ(
+          index,
+          Math.sin(x * 0.55 + time * 0.5) * 0.035 + Math.cos(y * 0.8 - time * 0.36) * 0.025,
+        )
+      }
+      lakePositions.needsUpdate = true
+      lakeGeometry.computeVertexNormals()
+      lakeSettled = options.reducedMotion === true
     }
-    lakePositions.needsUpdate = true
-    lakeGeometry.computeVertexNormals()
     for (const butterfly of butterflies) {
       const flight = time * 1.35 + butterfly.phase
       const flap = Math.sin(flight * 3.4) * 0.52
