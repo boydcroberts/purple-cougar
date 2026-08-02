@@ -570,21 +570,54 @@ const ARRANGEMENT: ReadonlyArray<readonly [number, number, WncTreeSpecies, numbe
   // trunks 6-9 metres out, which at this focal length filled the frame with
   // crowns and walled off the ridgeline the trees are supposed to frame.
   // Trees only earn their place here by leaving the middle of the shot empty.
-  [11.5, 17.0, 'white-pine', 1.15],
-  [-11.8, 18.5, 'white-pine', 1.05],
-  [9.6, 20.0, 'hemlock', 0.95],
-  [-9.4, 21.0, 'hemlock', 0.9],
-  [13.2, 22.0, 'dogwood', 0.95],
-  [-13.0, 20.0, 'dogwood', 0.95],
+  //
+  // HARD CONSTRAINT — no trunk may stand in the lake. Backdrop-local Z is
+  // `13.794 - depth`, so the water occupies depth 10.9 to 23.9, and after it
+  // was narrowed and re-centred it spans screenLeft -9 to +9. A trunk clears it
+  // by being outside that screenLeft band OR deeper than 23.9. An earlier
+  // arrangement had six trees at depth 17-22 near the axis, standing in open
+  // water; a later one cleared the water by pushing everything past depth 24
+  // and the whole treeline came back bleached, because scene fog starts at 18.
+  //
+  // So the near ranks hug the banks at |screenLeft| >= 10, close enough to stay
+  // green and crisp, and only the far treeline sits deep enough to go hazy —
+  // which is correct there, since that IS atmospheric perspective.
+  [10.5, 15.0, 'white-pine', 1.7],
+  [-10.2, 16.0, 'white-pine', 1.65],
+  [11.5, 18.0, 'hemlock', 1.5],
+  [-11.0, 17.5, 'hemlock', 1.5],
+  [13.0, 20.5, 'dogwood', 1.4],
+  [-12.5, 20.0, 'dogwood', 1.4],
+  [14.5, 23.0, 'red-maple', 1.5],
+  [-14.0, 24.0, 'white-pine', 1.5],
+  [16.5, 26.0, 'hemlock', 1.4],
+  [-16.0, 25.5, 'hemlock', 1.4],
   // Far treeline hugging the base of the ridges, reading as forest rather than
-  // as individual trees.
-  [4.6, 27.0, 'white-pine', 0.9],
-  [-5.2, 28.0, 'hemlock', 0.85],
-  [-16.0, 24.0, 'red-maple', 1.0],
-  [17.5, 26.0, 'white-pine', 0.85],
-  [-19.0, 26.5, 'white-pine', 0.9],
-  [-2.0, 30.0, 'hemlock', 0.8],
-  [11.0, 30.0, 'dogwood', 0.9],
+  // as individual trees. These are deliberately SMALL — a tree 8 units tall at
+  // depth 30 projects 0.69 ndc above the ground line, which puts its crown off
+  // the top of the frame and far above the ridges, whose summits only reach
+  // about 0.55. At the big scales used up front they became pale spires
+  // floating in the sky above the mountains. Kept under the skyline they read
+  // as the forested base of the ridge, which is the job.
+  [4.6, 29.0, 'white-pine', 1.05],
+  [-5.2, 30.0, 'hemlock', 1.12],
+  [-20.0, 29.0, 'red-maple', 1.15],
+  [20.0, 30.0, 'white-pine', 1.05],
+  [11.0, 32.0, 'dogwood', 1.15],
+  [-10.0, 33.0, 'white-pine', 1.0],
+  [-24.0, 32.0, 'hemlock', 1.12],
+  [24.0, 33.0, 'white-pine', 1.0],
+  [-15.0, 31.0, 'hemlock', 1.1],
+  [15.5, 31.5, 'red-maple', 1.12],
+  [0.0, 33.5, 'hemlock', 1.05],
+  [-29.0, 33.0, 'white-pine', 1.1],
+  [29.0, 34.0, 'hemlock', 1.08],
+  [7.5, 30.5, 'hemlock', 1.08],
+  [-7.8, 31.5, 'red-maple', 1.1],
+  [17.5, 34.0, 'white-pine', 1.02],
+  [-18.0, 34.5, 'dogwood', 1.05],
+  [26.0, 30.5, 'red-maple', 1.1],
+  [-26.5, 30.0, 'dogwood', 1.08],
 ]
 
 /**

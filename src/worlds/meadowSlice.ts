@@ -28,6 +28,7 @@ import {
   Vector3,
 } from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { makeMeadowTexture } from '../meadowTexture'
 import { makeRng } from './world'
 
 const TWO_PI = Math.PI * 2
@@ -112,6 +113,7 @@ interface SwayNode {
 interface MeadowMaterials {
   readonly playMat: MeshStandardMaterial
   readonly grass: MeshStandardMaterial
+  readonly mownRing: MeshStandardMaterial
   readonly grassDark: MeshStandardMaterial
   readonly stem: MeshStandardMaterial
   readonly wood: MeshStandardMaterial
@@ -124,9 +126,9 @@ interface MeadowMaterials {
   readonly bell: MeshStandardMaterial
   readonly bellDark: MeshStandardMaterial
   readonly hill: MeshStandardMaterial
-  readonly trainRed: MeshStandardMaterial
-  readonly trainBlue: MeshStandardMaterial
-  readonly trainCream: MeshStandardMaterial
+  readonly trainBody: MeshStandardMaterial
+  readonly trainChassis: MeshStandardMaterial
+  readonly trainTrim: MeshStandardMaterial
   readonly trainWheel: MeshStandardMaterial
   readonly smoke: MeshStandardMaterial
   readonly ring: MeshBasicMaterial
@@ -179,11 +181,30 @@ function makeMaterials(): MeadowMaterials {
   const standard = (color: Color | number | string, roughness = 0.84) =>
     new MeshStandardMaterial({ color, roughness, flatShading: true })
 
+  // The play pad and the mown ring are the whole foreground of the frame, so
+  // they carry the same mottled grass as the stage ground plane — a flat green
+  // disc here was most of what made the meadow read as a putting green. Their
+  // tints stay a touch lighter than the field beyond so the play space is still
+  // legible, but as mown grass rather than a hard colour step.
+  const padTexture = makeMeadowTexture(4.84)
+  const ringTexture = makeMeadowTexture(3.26)
+
   return {
-    playMat: standard(0x7ecb58),
+    playMat: new MeshStandardMaterial({
+      color: padTexture ? 0xc7e8b4 : 0x7ecb58,
+      map: padTexture,
+      roughness: 0.84,
+      flatShading: true,
+    }),
     // Warm, sunlit greens close to the ground plane — the previous cool
     // blue-greens read as dark "witch hat" cones against the bright meadow.
     grass: standard(0x55b04a),
+    mownRing: new MeshStandardMaterial({
+      color: ringTexture ? 0x9fd98a : 0x55b04a,
+      map: ringTexture,
+      roughness: 0.84,
+      flatShading: true,
+    }),
     grassDark: standard(0x3f9346),
     stem: standard(0x458b3e),
     wood: standard(0xa76435),
@@ -203,9 +224,13 @@ function makeMaterials(): MeadowMaterials {
     }),
     bellDark: standard(0x91501a),
     hill: standard(0x5b9b65),
-    trainRed: standard(0xd6604e),
-    trainBlue: standard(0x497fa8),
-    trainCream: standard(0xf3d89a),
+    // Purple, like the windmill and the cougar herself. The body sits deeper
+    // and more saturated than her coat and the trim goes pale, so the engine
+    // still reads as its own object against her rather than merging into a
+    // single purple mass at this distance.
+    trainBody: standard(0x7b4fb0),
+    trainChassis: standard(0x452c6e),
+    trainTrim: standard(0xd8c6ef),
     trainWheel: standard(0x494e5b),
     smoke: standard(0xe5edf0, 1),
     ring: new MeshBasicMaterial({
@@ -263,7 +288,10 @@ function addDistantTrain(parent: Group, materials: MeadowMaterials): {
   // but set further back and smaller than it once was: at its old size it ran
   // straight through the horizon band and left the Blue Ridge no room at all.
   train.position.set(-1.0, 0.78, -7.6)
-  train.scale.setScalar(0.48)
+  // The group scales about its own origin, which sits level with the deck
+  // (local y 0.02), so growing it keeps the rails at the same world height and
+  // only sinks the piers further below the meadow floor, where they are hidden.
+  train.scale.setScalar(1.05)
 
   // The deck spans well past both edges of every supported framing so the
   // continuously travelling train never visibly runs out of track. It reaches
@@ -291,7 +319,7 @@ function addDistantTrain(parent: Group, materials: MeadowMaterials): {
   // A bold near-side beam and three piers stop the track from reading like a
   // floating line. The resulting silhouette still stays low behind the play
   // surface and never competes with the cougar.
-  const bridgeFront = shadow(new Mesh(new BoxGeometry(18.08, 0.14, 0.1), materials.trainRed))
+  const bridgeFront = shadow(new Mesh(new BoxGeometry(18.08, 0.14, 0.1), materials.trainBody))
   bridgeFront.position.set(-2, 0, 0.37)
   train.add(bridgeFront)
   // Piers stretch from the raised deck all the way to the meadow floor.
@@ -309,24 +337,24 @@ function addDistantTrain(parent: Group, materials: MeadowMaterials): {
   vehicle.position.set(0, 0.2, 0)
   train.add(vehicle)
 
-  const chassis = shadow(new Mesh(new BoxGeometry(3.38, 0.22, 0.56), materials.trainBlue))
+  const chassis = shadow(new Mesh(new BoxGeometry(3.38, 0.22, 0.56), materials.trainChassis))
   chassis.position.y = 0.16
   vehicle.add(chassis)
 
-  const engine = shadow(new Mesh(new BoxGeometry(0.72, 0.52, 0.5), materials.trainRed))
+  const engine = shadow(new Mesh(new BoxGeometry(0.72, 0.52, 0.5), materials.trainBody))
   engine.position.set(0.82, 0.46, 0)
   vehicle.add(engine)
 
-  const boiler = shadow(new Mesh(new CylinderGeometry(0.25, 0.25, 0.88, 10), materials.trainCream))
+  const boiler = shadow(new Mesh(new CylinderGeometry(0.25, 0.25, 0.88, 10), materials.trainTrim))
   boiler.rotation.z = Math.PI / 2
   boiler.position.set(0.31, 0.53, 0)
   vehicle.add(boiler)
 
-  const cabin = shadow(new Mesh(new BoxGeometry(0.56, 0.67, 0.52), materials.trainRed))
+  const cabin = shadow(new Mesh(new BoxGeometry(0.56, 0.67, 0.52), materials.trainBody))
   cabin.position.set(-0.37, 0.57, 0)
   vehicle.add(cabin)
 
-  const cabinRoof = shadow(new Mesh(new RoundedBoxGeometry(0.72, 0.12, 0.62, 0.05, 2), materials.trainCream))
+  const cabinRoof = shadow(new Mesh(new RoundedBoxGeometry(0.72, 0.12, 0.62, 0.05, 2), materials.trainTrim))
   cabinRoof.position.set(-0.37, 0.94, 0)
   vehicle.add(cabinRoof)
 
@@ -334,7 +362,7 @@ function addDistantTrain(parent: Group, materials: MeadowMaterials): {
   window.position.set(-0.37, 0.64, 0.272)
   vehicle.add(window)
 
-  const wagon = shadow(new Mesh(new RoundedBoxGeometry(0.84, 0.42, 0.52, 0.08, 3), materials.trainCream))
+  const wagon = shadow(new Mesh(new RoundedBoxGeometry(0.84, 0.42, 0.52, 0.08, 3), materials.trainTrim))
   wagon.position.set(-1.33, 0.4, 0)
   vehicle.add(wagon)
 
@@ -358,7 +386,7 @@ function addDistantTrain(parent: Group, materials: MeadowMaterials): {
     }
   }
 
-  const engineFace = shadow(new Mesh(new CylinderGeometry(0.255, 0.255, 0.075, 10), materials.trainRed))
+  const engineFace = shadow(new Mesh(new CylinderGeometry(0.255, 0.255, 0.075, 10), materials.trainBody))
   engineFace.rotation.z = Math.PI / 2
   engineFace.position.set(1.19, 0.53, 0)
   vehicle.add(engineFace)
@@ -410,7 +438,7 @@ export function createMeadowSlice(options: MeadowSliceOptions = {}): MeadowSlice
 
   // A subtle ring of cut grass keeps the first play space legible without
   // requiring invisible walls or another UI overlay.
-  const path = new Mesh(new CircleGeometry(1.63, 48), materials.grass)
+  const path = new Mesh(new CircleGeometry(1.63, 48), materials.mownRing)
   path.name = 'Mown meadow ring'
   path.rotation.x = -Math.PI / 2
   path.position.y = 0.001
@@ -567,7 +595,7 @@ export function createMeadowSlice(options: MeadowSliceOptions = {}): MeadowSlice
   bellHalo.position.set(bellTarget.x, 0.65, bellTarget.z - 0.225)
   bellStand.add(bellHalo)
 
-  const bellButton = shadow(new Mesh(new SphereGeometry(0.09, 10, 8), materials.trainRed))
+  const bellButton = shadow(new Mesh(new SphereGeometry(0.09, 10, 8), materials.trainBody))
   bellButton.name = 'Bell station red button'
   bellButton.position.set(bellTarget.x, 0.17, bellTarget.z + 0.31)
   bellStand.add(bellButton)
@@ -625,13 +653,15 @@ export function createMeadowSlice(options: MeadowSliceOptions = {}): MeadowSlice
   const hillGeometry = new DodecahedronGeometry(1, 1)
   const hillA = shadow(new Mesh(hillGeometry, materials.hill))
   hillA.name = 'Distant meadow hill'
-  hillA.position.set(-5.1, 0.34, -6.45)
-  hillA.scale.set(3.4, 0.5, 1.05)
+  // Pushed well back and out: at z -6.45 these landed inside the relocated
+  // lake, so a green dome sat in open water.
+  hillA.position.set(-12.5, 0.34, -17.0)
+  hillA.scale.set(6.2, 0.95, 1.9)
   root.add(hillA)
   const hillB = shadow(new Mesh(hillGeometry, materials.hill))
   hillB.name = 'Distant meadow hill right'
-  hillB.position.set(5.5, 0.3, -6.65)
-  hillB.scale.set(3.1, 0.46, 0.9)
+  hillB.position.set(13.0, 0.3, -17.4)
+  hillB.scale.set(5.8, 0.9, 1.75)
   root.add(hillB)
 
   const treeTrunkGeometry = new CylinderGeometry(0.075, 0.1, 0.85, 6)
@@ -864,7 +894,13 @@ export function createMeadowSlice(options: MeadowSliceOptions = {}): MeadowSlice
       for (const material of nodeMaterials) ownedMaterials.add(material)
     })
     for (const geometry of geometries) geometry.dispose()
-    for (const material of ownedMaterials) material.dispose()
+    for (const material of ownedMaterials) {
+      // Material.dispose() does not release its textures, and the meadow tiles
+      // are built per-instance for this slice.
+      const map = (material as { map?: { dispose(): void } | null }).map
+      map?.dispose()
+      material.dispose()
+    }
   }
 
   return {

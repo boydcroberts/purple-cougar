@@ -797,7 +797,7 @@ export function createWncGarden(options: WncGardenOptions = {}): WncGarden {
       root.add(rock)
     }
 
-    const boxwoods = 3 + (depth > 1.8 ? 1 : 0)
+    const boxwoods = 3 + Math.round(depth * 0.9)
     for (let box = 0; box < boxwoods; box++) {
       const [x, z] = place((box + 0.5) / boxwoods + (random() - 0.5) * 0.14, 0.05 + random() * 0.05)
       const spread = 0.17 + random() * 0.07
@@ -812,11 +812,16 @@ export function createWncGarden(options: WncGardenOptions = {}): WncGarden {
 
     // Daisies go in drifts, not a scatter: a mass of one thing reading as one
     // shape is how a real bed looks, and it is far easier for a child to name.
-    const drifts = 2 + (depth > 1.8 ? 1 : 0)
+    // Counts scale with the bed's real depth. The deep beds behind the meadow
+    // run 2.9 units front to back, and the old fixed-ish counts spread a dozen
+    // clumps across all of that — which is exactly why the planting read as a
+    // single tidy strip instead of something you could get lost in.
+    const drifts = 2 + Math.round(depth * 1.45)
     for (let drift = 0; drift < drifts; drift++) {
       const driftAcross = (drift + 0.5) / drifts + (random() - 0.5) * 0.16
-      const driftBack = 0.18 + random() * 0.26
-      const sprigs = 3 + Math.round(depth * 0.45)
+      // Reach the whole bed, not just its front 60%.
+      const driftBack = 0.14 + random() * 0.66
+      const sprigs = 5 + Math.round(depth * 2.2)
       for (let sprig = 0; sprig < sprigs; sprig++) {
         const [x, z] = place(
           driftAcross + (random() - 0.5) * 0.22,
@@ -831,7 +836,12 @@ export function createWncGarden(options: WncGardenOptions = {}): WncGarden {
         const yaw = random() * TWO_PI
         clump.position.set(x, 0, z)
         clump.rotation.y = yaw
-        clump.scale.setScalar(0.95 + random() * 0.5)
+        // Big blooms, deliberately NOT tall. The flower heads are horizontal
+        // discs, so squashing the vertical axis costs almost no apparent bloom
+        // size while keeping the drift from growing into a wall that hides the
+        // lake behind it. Scaling uniformly did exactly that.
+        const spread = 1.55 + random() * 0.95
+        clump.scale.set(spread, spread * 0.62, spread)
         root.add(clump)
         swaying.push({
           node: clump,
@@ -851,7 +861,7 @@ export function createWncGarden(options: WncGardenOptions = {}): WncGarden {
     // One colour group per half of the crescent. Alternating them plant by
     // plant would read as confetti instead of as two named varieties.
     const roseSpec = roseSpecs[index < 3 ? 0 : 1]!
-    const roses = depth > 1.7 ? 2 : 1
+    const roses = 1 + Math.round(depth * 1.15)
     for (let rose = 0; rose < roses; rose++) {
       const [x, z] = place((rose + 0.5) / roses + (random() - 0.5) * 0.22, 0.42 + random() * 0.16)
       const shrub = addRoseShrub(
@@ -859,7 +869,7 @@ export function createWncGarden(options: WncGardenOptions = {}): WncGarden {
         roseSpec,
         x,
         z,
-        1 + random() * 0.28,
+        1.4 + random() * 0.5,
         random() * TWO_PI,
         random,
       )
@@ -877,7 +887,7 @@ export function createWncGarden(options: WncGardenOptions = {}): WncGarden {
       })
     }
 
-    const backbones = 1 + (depth > 2 ? 1 : 0)
+    const backbones = 1 + Math.round(depth * 0.8)
     for (let shrubIndex = 0; shrubIndex < backbones; shrubIndex++) {
       const spec = backboneSpecs[(index + shrubIndex) % 3 === 2 ? 1 : 0]!
       const [x, z] = place(
@@ -903,7 +913,7 @@ export function createWncGarden(options: WncGardenOptions = {}): WncGarden {
       plants.push({ node: shrub.group, species: spec.species, commonName: spec.commonName })
     }
 
-    const ferns = depth > 1.5 ? 1 + (depth > 2.6 ? 1 : 0) : 0
+    const ferns = depth > 1.2 ? 1 + Math.round(depth * 0.9) : 0
     for (let fern = 0; fern < ferns; fern++) {
       // Offset from the shrub band so the fronds show in the gaps rather than
       // disappearing behind a rhododendron the moment they are planted.

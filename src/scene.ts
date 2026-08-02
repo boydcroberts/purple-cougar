@@ -18,6 +18,7 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from 'three'
+import { makeMeadowTexture } from './meadowTexture'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js'
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js'
@@ -155,9 +156,15 @@ export function createStage(host: HTMLElement): Stage {
   rim.position.set(-2.2, 2.4, -4.5)
   scene.add(rim)
 
+  const meadowTexture = makeMeadowTexture(60)
   const ground = new Mesh(
     new PlaneGeometry(60, 60),
-    new MeshStandardMaterial({ color: GRASS, roughness: 1, metalness: 0 }),
+    new MeshStandardMaterial({
+      color: meadowTexture ? 0xffffff : GRASS,
+      map: meadowTexture,
+      roughness: 1,
+      metalness: 0,
+    }),
   )
   ground.rotation.x = -Math.PI / 2
   ground.receiveShadow = true

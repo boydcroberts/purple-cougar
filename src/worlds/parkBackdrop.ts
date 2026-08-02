@@ -55,11 +55,12 @@ interface BackdropMaterials {
   readonly middleHill: MeshStandardMaterial
   readonly nearHill: MeshStandardMaterial
   readonly lake: MeshStandardMaterial
-  readonly lakeShore: MeshStandardMaterial
   readonly cloud: MeshBasicMaterial
   readonly cloudShade: MeshBasicMaterial
-  readonly windmillCream: MeshStandardMaterial
-  readonly windmillCoral: MeshStandardMaterial
+  /** Distinct cumulus silhouettes. Empty only where there is no DOM to paint on. */
+  readonly cloudSoft: ReadonlyArray<MeshBasicMaterial>
+  readonly windmillTower: MeshStandardMaterial
+  readonly windmillTrim: MeshStandardMaterial
   readonly windmillRoof: MeshStandardMaterial
   readonly windmillBlade: MeshStandardMaterial
   readonly butterflyBody: MeshStandardMaterial
@@ -110,16 +111,40 @@ function makeMaterials(): BackdropMaterials {
       metalness: 0.15,
       flatShading: false,
     }),
-    lakeShore: standard(0xb9ad86),
     cloud: new MeshBasicMaterial({ color: 0xf5fbf5 }),
     cloudShade: new MeshBasicMaterial({ color: 0xcfe6e8 }),
-    windmillCream: standard(0xffe7b0),
-    windmillCoral: standard(0xe88371),
-    windmillRoof: standard(0x7a5b82),
-    windmillBlade: standard(0xf4c96c),
+    cloudSoft: [0, 1, 2]
+      .map((variant) => makeCloudTexture(variant))
+      .filter((map): map is CanvasTexture => map !== null)
+      // depthWrite off so overlapping clouds blend instead of cutting each
+      // other's soft edges into visible rectangles.
+      .map((map) => new MeshBasicMaterial({
+        map,
+        transparent: true,
+        depthWrite: false,
+        fog: false,
+      })),
+    // Purple, to match the cougar's world — but deliberately a LIGHTER, less
+    // saturated lavender than her coat. Pitching the tower at her own purple
+    // would have the landmark competing with the character for the eye.
+    windmillTower: standard(0x9d80c8),
+    windmillTrim: standard(0xd9c2f2),
+    windmillRoof: standard(0x5c3b7d),
+    windmillBlade: standard(0xe8dbf7),
     butterflyBody: standard(0x4b5664),
-    butterflyWingA: standard(0xf29ab0),
-    butterflyWingB: standard(0xf4c85f),
+    // Flat single-sided plates vanish every time a wing swings past edge-on.
+    butterflyWingA: new MeshStandardMaterial({
+      color: 0xf29ab0,
+      roughness: 0.9,
+      flatShading: true,
+      side: DoubleSide,
+    }),
+    butterflyWingB: new MeshStandardMaterial({
+      color: 0xf4c85f,
+      roughness: 0.9,
+      flatShading: true,
+      side: DoubleSide,
+    }),
     treeTrunk: standard(0x7a4a2e),
     treeCrown: standard(0x3e8b4d),
     treeCrownLight: standard(0x54a458),
@@ -262,31 +287,168 @@ function makeRidgeGeometry(
   return geometry
 }
 
+/** Deterministic lattice hash, so every load paints the same sky. */
+function cloudHash(ix: number, iy: number, seed: number): number {
+  const h = Math.sin(ix * 127.1 + iy * 311.7 + seed * 74.7) * 43758.5453
+  return h - Math.floor(h)
+}
+
+function cloudNoise(x: number, y: number, seed: number): number {
+  const ix = Math.floor(x)
+  const iy = Math.floor(y)
+  const fx = x - ix
+  const fy = y - iy
+  const ux = fx * fx * (3 - 2 * fx)
+  const uy = fy * fy * (3 - 2 * fy)
+  const a = cloudHash(ix, iy, seed)
+  const b = cloudHash(ix + 1, iy, seed)
+  const c = cloudHash(ix, iy + 1, seed)
+  const d = cloudHash(ix + 1, iy + 1, seed)
+  return (a * (1 - ux) + b * ux) * (1 - uy) + (c * (1 - ux) + d * ux) * uy
+}
+
+/** Five octaves — the high ones are what give a cumulus its cauliflower rim. */
+function cloudFbm(x: number, y: number, seed: number): number {
+  let sum = 0
+  let amplitude = 0.5
+  let frequency = 1
+  for (let octave = 0; octave < 5; octave++) {
+    sum += cloudNoise(x * frequency, y * frequency, seed + octave * 13) * amplitude
+    frequency *= 2.07
+    amplitude *= 0.5
+  }
+  return sum
+}
+
+/**
+ * A cumulus cloud, built as a fractal density field rather than as a handful of
+ * smooth blobs.
+ *
+ * Two earlier passes failed here for opposite reasons: hard dodecahedron puffs
+ * read as childish stickers, and overlapping radial gradients read as
+ * featureless smudges. Neither had the thing that actually makes a cloud look
+ * like a cloud — billowing self-similar structure at several scales. So the
+ * silhouette comes from thresholding fbm noise against a cumulus profile
+ * (billowing dome, flat base), which gives a cauliflower rim for free, and the
+ * shading runs bright warm on top to cool and dark underneath.
+ *
+ * `variant` reseeds the field so no two clouds in the sky share a silhouette.
+ * Returns null when there is no DOM (headless build/test).
+ */
+function makeCloudTexture(variant: number): CanvasTexture | null {
+  if (typeof document === 'undefined') return null
+  const width = 256
+  const height = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+
+  const seed = 1 + variant * 7.13
+  const image = ctx.createImageData(width, height)
+  // Golden hour: sunlit crowns take warm light, the flat base goes cool and
+  // markedly darker. That top-to-bottom swing is most of what reads as volume.
+  const lit = [255, 251, 243] as const
+  const shadowed = [176, 174, 198] as const
+
+  for (let py = 0; py < height; py++) {
+    for (let px = 0; px < width; px++) {
+      const u = px / width
+      const v = py / height
+
+      // Cumulus profile: an ellipse squashed wide, with its base cut flat.
+      const dx = (u - 0.5) / 0.46
+      const dy = (v - 0.66) / 0.56
+      const dome = 1 - Math.sqrt(dx * dx + dy * dy)
+      // Anything below the base line falls away fast, which is what gives a
+      // cumulus its distinctive flat bottom instead of a round balloon.
+      const baseCut = v > 0.74 ? (v - 0.74) / 0.16 : 0
+
+      const detail = cloudFbm(u * 5.5, v * 5.5, seed)
+      const density = dome * 0.72 + detail * 0.62 - baseCut * 0.9
+
+      // Soft but narrow threshold: wide enough not to alias, tight enough that
+      // the fractal edge survives as structure rather than dissolving to haze.
+      const alpha = Math.max(0, Math.min(1, (density - 0.34) / 0.15))
+
+      // Lit from above: higher in the cloud and denser both read brighter.
+      const shade = Math.max(0, Math.min(1, v * 1.15 - detail * 0.5 + baseCut * 0.35))
+      const offset = (py * width + px) * 4
+      for (let c = 0; c < 3; c++) {
+        image.data[offset + c] = Math.round(lit[c]! + (shadowed[c]! - lit[c]!) * shade)
+      }
+      image.data[offset + 3] = Math.round(alpha * 255)
+    }
+  }
+  ctx.putImageData(image, 0, 0)
+
+  const texture = new CanvasTexture(canvas)
+  texture.colorSpace = SRGBColorSpace
+  return texture
+}
+
+/**
+ * One butterfly wing, hinged at the body and lying in the X-Y plane so the
+ * existing rotation about Y still swings it like a hinge.
+ *
+ * A flattened dodecahedron was standing in for this, and at the size these
+ * needed to be to read as creatures at all it landed as an opaque pink or
+ * yellow lump floating in the mid-ground. A wing needs a wing's outline: a
+ * swept forewing tip and a smaller hindwing lobe below it.
+ */
+function makeButterflyWingGeometry(): BufferGeometry {
+  // Fractions of the wing span, measured out from the hinge at x = 0.
+  const outline = new Float32Array([
+    0, -0.15, 0,
+    0, 0.18, 0,
+    0.95, 0.5, 0,
+    1.0, 0.02, 0,
+    0.5, -0.45, 0,
+  ])
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new BufferAttribute(outline, 3))
+  geometry.setIndex([0, 1, 2, 0, 2, 3, 0, 3, 4])
+  geometry.computeVertexNormals()
+  return geometry
+}
+
 function addCloud(
   parent: Group,
   geometry: DodecahedronGeometry,
+  planeGeometry: PlaneGeometry | null,
   materials: BackdropMaterials,
   x: number,
   y: number,
   z: number,
   scale: number,
   phase: number,
+  variant: number,
 ): CloudMotion {
   const cloud = new Group()
   cloud.name = 'Large low-poly cloud'
   cloud.position.set(x, y, z)
 
-  const puffs: ReadonlyArray<readonly [number, number, number, boolean]> = [
-    [-0.62, -0.02, 0.78, true],
-    [-0.22, 0.16, 1.02, false],
-    [0.28, 0.18, 0.94, false],
-    [0.69, 0.02, 0.66, true],
-  ]
-  for (const [offsetX, offsetY, puffScale, shaded] of puffs) {
-    const puff = new Mesh(geometry, shaded ? materials.cloudShade : materials.cloud)
-    puff.position.set(offsetX, offsetY, 0)
-    puff.scale.set(puffScale * 0.92, puffScale * 0.54, puffScale * 0.48)
-    cloud.add(puff)
+  const softMaterial = materials.cloudSoft[variant % Math.max(1, materials.cloudSoft.length)]
+  if (planeGeometry && softMaterial) {
+    const billboard = new Mesh(planeGeometry, softMaterial)
+    // The painted tile carries its own soft margin, so it is drawn wider than
+    // the puff cluster it replaces to land at the same apparent size.
+    billboard.scale.set(2.6, 1.3, 1)
+    cloud.add(billboard)
+  } else {
+    const puffs: ReadonlyArray<readonly [number, number, number, boolean]> = [
+      [-0.62, -0.02, 0.78, true],
+      [-0.22, 0.16, 1.02, false],
+      [0.28, 0.18, 0.94, false],
+      [0.69, 0.02, 0.66, true],
+    ]
+    for (const [offsetX, offsetY, puffScale, shaded] of puffs) {
+      const puff = new Mesh(geometry, shaded ? materials.cloudShade : materials.cloud)
+      puff.position.set(offsetX, offsetY, 0)
+      puff.scale.set(puffScale * 0.92, puffScale * 0.54, puffScale * 0.48)
+      cloud.add(puff)
+    }
   }
 
   cloud.scale.setScalar(scale)
@@ -309,11 +471,11 @@ function addWindmill(
   const windmill = new Group()
   windmill.name = 'Friendly distant windmill'
   windmill.position.set(x, 0.01, z)
-  windmill.scale.setScalar(0.82)
+  windmill.scale.setScalar(1.55)
 
   const tower = new Mesh(
     new CylinderGeometry(0.19, 0.39, 1.32, 6),
-    materials.windmillCream,
+    materials.windmillTower,
   )
   tower.position.y = 0.66
   windmill.add(tower)
@@ -323,7 +485,7 @@ function addWindmill(
   roof.rotation.y = Math.PI / 6
   windmill.add(roof)
 
-  const axle = new Mesh(new BoxGeometry(0.18, 0.14, 0.16), materials.windmillCoral)
+  const axle = new Mesh(new BoxGeometry(0.18, 0.14, 0.16), materials.windmillTrim)
   axle.position.set(0, 1.34, 0.22)
   windmill.add(axle)
 
@@ -339,7 +501,7 @@ function addWindmill(
     pivot.add(sail)
     rotor.add(pivot)
   }
-  const hub = new Mesh(new DodecahedronGeometry(0.14, 0), materials.windmillCoral)
+  const hub = new Mesh(new DodecahedronGeometry(0.14, 0), materials.windmillTrim)
   hub.scale.z = 0.55
   rotor.add(hub)
   windmill.add(rotor)
@@ -349,7 +511,7 @@ function addWindmill(
 
 function addButterfly(
   parent: Group,
-  wingGeometry: DodecahedronGeometry,
+  wingGeometry: BufferGeometry,
   materials: BackdropMaterials,
   x: number,
   y: number,
@@ -365,14 +527,16 @@ function addButterfly(
   body.rotation.x = Math.PI / 2
   butterfly.add(body)
 
+  // Each wing pivots at the body, not around its own centre, so the flap reads
+  // as a hinge rather than as a blob spinning in place.
   const leftWing = new Mesh(wingGeometry, alternate ? materials.butterflyWingB : materials.butterflyWingA)
-  leftWing.position.set(-0.058, 0.014, 0)
-  leftWing.scale.set(0.74, 1.04, 0.22)
+  leftWing.position.set(-0.012, 0.014, 0)
+  leftWing.scale.set(-0.15, 0.15, 0.15)
   butterfly.add(leftWing)
 
   const rightWing = new Mesh(wingGeometry, alternate ? materials.butterflyWingA : materials.butterflyWingB)
-  rightWing.position.set(0.058, 0.014, 0)
-  rightWing.scale.set(0.74, 1.04, 0.22)
+  rightWing.position.set(0.012, 0.014, 0)
+  rightWing.scale.set(0.15, 0.15, 0.15)
   butterfly.add(rightWing)
 
   parent.add(butterfly)
@@ -422,9 +586,10 @@ export function createParkBackdrop(options: ParkBackdropOptions = {}): ParkBackd
   const materials = makeMaterials()
   const hillGeometry = new SphereGeometry(1, 10, 5, 0, TWO_PI, 0, Math.PI / 2)
   const cloudGeometry = new DodecahedronGeometry(1, 0)
+  const cloudPlaneGeometry = materials.cloudSoft.length > 0 ? new PlaneGeometry(1, 1) : null
   // Large enough to actually read as living creatures from the play camera —
   // at the previous size they disappeared into single pixels.
-  const butterflyGeometry = new DodecahedronGeometry(0.125, 0)
+  const butterflyGeometry = makeButterflyWingGeometry()
 
   // --- The Blue Ridge, straight off the reference photo: six ridgelines
   // stacked back to front. The nearest is nearly a dark teal silhouette and
@@ -507,17 +672,32 @@ export function createParkBackdrop(options: ParkBackdropOptions = {}): ParkBackd
   // --- A mountain lake resting in the valley below the ridges. It is wide,
   // calm, and set well back, so it reads as a real body of water the park
   // could one day walk down to rather than a puddle behind the meadow.
-  const lakeShore = new Mesh(new PlaneGeometry(30, 11), materials.lakeShore)
-  lakeShore.name = 'Lake shore'
-  lakeShore.rotation.x = -Math.PI / 2
-  lakeShore.position.set(-1.5, 0.012, -7.4)
-  root.add(lakeShore)
-
-  const lakeGeometry = new PlaneGeometry(28, 9, 40, 14)
+  // Pulled forward into the band between the garden crescent and the ridges.
+  //
+  // Measured, not guessed: at its old centre the water spanned ndc y 0.291 to
+  // 0.349 — 23 pixels at 800px tall, which is the "sliver" the roadmap
+  // diagnosed. A bigger plane cannot fix that; a horizontal surface 20 units
+  // out seen from a 0.95m eye height subtends almost nothing. Distance is the
+  // only lever, so the near shore now sits ~7 units from the origin instead of
+  // ~13. That is still clear of the garden crescent, whose beds reach 5.5
+  // (bedOuterRadius in wncGarden.ts) — putting water inside that footprint is
+  // what made flowers render through the lake on the previous attempt.
+  // No sand bar. A pale shore plane sitting a hair under the water read as a
+  // dirty band cutting through the middle of the lake rather than as a beach,
+  // and the water wants to be one uncomplicated sweep of blue. Grass meets
+  // water directly at the near edge, which is what the reference lake does.
+  // Narrowed from 44 and re-centred on the view axis so the water has visible
+  // BANKS. At full width it spanned the frame across its whole depth band
+  // (depth 10.9 to 23.9), which meant no tree could stand at a close enough
+  // depth to be on screen without standing in open water — the treeline had to
+  // be pushed past 24 and came back bleached by the fog, which starts at 18.
+  // With banks, the framing trees sit on land in clear air and the lake still
+  // fills the frame at its near edge, where it matters.
+  const lakeGeometry = new PlaneGeometry(18, 13, 32, 18)
   const lake = new Mesh(lakeGeometry, materials.lake)
   lake.name = 'Mountain lake'
   lake.rotation.x = -Math.PI / 2
-  lake.position.set(-1.5, 0.03, -7.4)
+  lake.position.set(0, 0.03, -3.6)
   lake.receiveShadow = true
   root.add(lake)
   const lakePositions = lakeGeometry.getAttribute('position') as BufferAttribute
@@ -528,28 +708,36 @@ export function createParkBackdrop(options: ParkBackdropOptions = {}): ParkBackd
   // sat directly across the sightline and buried the ridges and the lake
   // entirely, which is the whole reason the view existed. Their job is to
   // close the left and right corners, not to own the horizon.
-  addHill(root, hillGeometry, materials.middleHill, -9.2, -4.2, 7.2, 0.62, 1.1)
-  addHill(root, hillGeometry, materials.middleHill, 9.4, -4.4, 7.6, 0.68, 1.15)
-  addHill(root, hillGeometry, materials.nearHill, -5.6, -0.6, 4.0, 0.42, 0.8)
-  addHill(root, hillGeometry, materials.nearHill, 6.4, -0.7, 4.2, 0.46, 0.82)
+  // These now sit BEYOND the lake's far edge (local z -10.1) rather than at
+  // z -0.6..-4.4, which after the water came forward left them standing in the
+  // middle of it. Read as the far shore instead: a lake needs a treed bank
+  // rising behind it to be a lake and not a blue stripe. They are scaled up to
+  // keep closing the left and right corners from the greater distance.
+  addHill(root, hillGeometry, materials.middleHill, -13.5, -17.5, 11.5, 1.02, 1.5)
+  addHill(root, hillGeometry, materials.middleHill, 13.8, -17.8, 12, 1.1, 1.55)
+  addHill(root, hillGeometry, materials.nearHill, -8.2, -12.4, 7.2, 0.72, 1.1)
+  addHill(root, hillGeometry, materials.nearHill, 9.0, -12.6, 7.4, 0.76, 1.12)
 
   const clouds = [
-    addCloud(root, cloudGeometry, materials, -3.95, 2.78, -1.7, 1.08, random() * TWO_PI),
-    addCloud(root, cloudGeometry, materials, 0.55, 3.58, -3.45, 0.74, random() * TWO_PI),
-    addCloud(root, cloudGeometry, materials, 3.55, 2.7, -1.25, 0.92, random() * TWO_PI),
+    addCloud(root, cloudGeometry, cloudPlaneGeometry, materials, -3.95, 2.78, -1.7, 1.08, random() * TWO_PI, 0),
+    addCloud(root, cloudGeometry, cloudPlaneGeometry, materials, 0.55, 3.58, -3.45, 0.74, random() * TWO_PI, 1),
+    addCloud(root, cloudGeometry, cloudPlaneGeometry, materials, 3.55, 2.7, -1.25, 0.92, random() * TWO_PI, 2),
     // A fuller sky: smaller, higher fair-weather clouds layered between the
     // original three so the blue never reads as empty.
-    addCloud(root, cloudGeometry, materials, -1.75, 3.25, -2.6, 0.6, random() * TWO_PI),
-    addCloud(root, cloudGeometry, materials, 2.1, 3.45, -3.1, 0.55, random() * TWO_PI),
-    addCloud(root, cloudGeometry, materials, -5.9, 3.3, -2.9, 0.82, random() * TWO_PI),
-    addCloud(root, cloudGeometry, materials, 5.6, 3.35, -2.7, 0.7, random() * TWO_PI),
+    addCloud(root, cloudGeometry, cloudPlaneGeometry, materials, -1.75, 3.25, -2.6, 0.6, random() * TWO_PI, 3),
+    addCloud(root, cloudGeometry, cloudPlaneGeometry, materials, 2.1, 3.45, -3.1, 0.55, random() * TWO_PI, 4),
+    addCloud(root, cloudGeometry, cloudPlaneGeometry, materials, -5.9, 3.3, -2.9, 0.82, random() * TWO_PI, 5),
+    addCloud(root, cloudGeometry, cloudPlaneGeometry, materials, 5.6, 3.35, -2.7, 0.7, random() * TWO_PI, 6),
   ]
 
   // Measured against the live follow camera (window.__pc.project): this lands
-  // the windmill across screen x -0.77..-0.90, i.e. clear of the cougar's ear
-  // at -0.71 and clear of the frame edge. The gap between her silhouette and
-  // the edge only fits one landmark, so nothing else goes on the left.
-  const [windmillX, windmillZ] = placeInView(5.6, 12)
+  // the windmill across screen x -0.85..-0.61 with its sail tips at y 0.88,
+  // so the whole of it clears both the frame edge and the top. It had to move
+  // further out and back when the tower grew — at the old (5.6, 12) the larger
+  // windmill ran off the left edge at -1.01 and its sails were cut off by the
+  // top of the frame. The gap between her silhouette and the edge only fits
+  // one landmark, so nothing else goes on the left.
+  const [windmillX, windmillZ] = placeInView(6.2, 15)
   const rotor = addWindmill(root, materials, windmillX, windmillZ)
 
   // A few hillside trees break up the big flat green shapes and give the
@@ -636,7 +824,13 @@ export function createParkBackdrop(options: ParkBackdropOptions = {}): ParkBackd
       for (const material of meshMaterials) ownedMaterials.add(material)
     })
     for (const geometry of geometries) geometry.dispose()
-    for (const material of ownedMaterials) material.dispose()
+    for (const material of ownedMaterials) {
+      // Material.dispose() does not release its textures, and every map in this
+      // module is painted here and owned by this backdrop alone.
+      const map = (material as { map?: { dispose(): void } | null }).map
+      map?.dispose()
+      material.dispose()
+    }
     for (const geometry of ridgeGeometries) geometry.dispose()
   }
 

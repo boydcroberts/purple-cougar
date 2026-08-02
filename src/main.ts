@@ -31,6 +31,7 @@ import { createMeadowSlice } from './worlds/meadowSlice'
 import { createStonePath } from './worlds/stonePath'
 import { createWhiteSquirrel } from './worlds/whiteSquirrel'
 import { createWncGarden } from './worlds/wncGarden'
+import { createForegroundFringe } from './worlds/foregroundFringe'
 import { createWncTrees } from './worlds/wncTrees'
 import { Raycaster, Vector2, Vector3 } from 'three'
 
@@ -119,6 +120,9 @@ const trees = createWncTrees()
 const garden = createWncGarden()
 const stonePath = createStonePath()
 const squirrel = createWhiteSquirrel()
+// Near-camera grass framing the bottom corners; see the module header for why
+// its positions are measured rather than authored.
+const foregroundFringe = createForegroundFringe()
 stage.scene.add(
   backdrop.root,
   trees.root,
@@ -126,6 +130,7 @@ stage.scene.add(
   stonePath.root,
   meadow.root,
   squirrel.root,
+  foregroundFringe.root,
   cougar.root,
   ballView.group,
   roarRings.group,
@@ -551,6 +556,7 @@ function frame(now: number): void {
 
   ballView.update(ball, visualCuff, frameDt)
   backdrop.update(elapsed, frameDt)
+  foregroundFringe.update(elapsed, frameDt)
   camera.update(frameDt, { x: 0, y: 0.52, z: -0.18 }, ball.pos, speed(ball))
   stage.render()
 
