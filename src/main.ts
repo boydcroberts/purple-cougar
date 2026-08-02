@@ -87,7 +87,9 @@ const forceModel = modelDebugTarget === '1' || modelDebugTarget === 'v2'
 // The cinematic plate now has more garden and train information worth seeing.
 // Scale the invisible physics driver with the visible hero so the cuff, ball,
 // contact shadow, and pointer target remain a single coherent character.
-const DESKTOP_HERO_SCALE = 0.8
+// Give the garden more breathing room around the hero while keeping the
+// physics driver, cuff, ball, and pointer target on the same scaled rig.
+const DESKTOP_HERO_SCALE = 0.68
 // The prior primitive-heavy landscape remains available for diagnosis, but the
 // shipping desktop experience uses a coherent authored environment so the
 // world can meet the cougar's image quality without crowding her.
