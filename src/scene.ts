@@ -36,6 +36,11 @@ export interface Stage {
    * renders as an opaque rectangle.
    */
   setFlatHeroMode(enabled: boolean): void
+  /**
+   * Hide the old procedural sky/ground when a camera-locked authored scenic
+   * plate is providing the visible environment.
+   */
+  setCinematicEnvironmentMode(enabled: boolean): void
   /** QA hook: orbit the camera azimuth, in degrees, around the subject. */
   setAzimuth(deg: number): void
 }
@@ -263,6 +268,10 @@ export function createStage(host: HTMLElement): Stage {
       flatHeroMode = enabled
       gtaoPass.enabled = !enabled
       bokehPass.enabled = !enabled && camera.aspect >= 1.2
+    },
+    setCinematicEnvironmentMode(enabled) {
+      skyDome.visible = !enabled
+      ground.visible = !enabled
     },
     setAzimuth(deg: number) {
       const r = Math.hypot(camera.position.x, camera.position.z)

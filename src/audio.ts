@@ -19,6 +19,7 @@ export interface Sfx {
 
 export function createSfx(): Sfx {
   let ctx: AudioContext | null = null
+  let master: GainNode | null = null
   let muted = false
 
   // Purple Cougar is designed to communicate through animation, color, and
@@ -39,6 +40,27 @@ export function createSfx(): Sfx {
   }
 
   /**
+   * One output node makes mute real: it silences a roar or canyon tail already
+   * in flight instead of merely blocking the next synthesized cue.
+   */
+  function masterGain(c: AudioContext): GainNode {
+    if (master) return master
+    master = c.createGain()
+    master.gain.value = muted ? 0.0001 : 1
+    master.connect(c.destination)
+    return master
+  }
+
+  function setMasterMuted(nextMuted: boolean): void {
+    muted = nextMuted
+    if (!ctx || !master) return
+    const now = ctx.currentTime
+    master.gain.cancelScheduledValues(now)
+    master.gain.setValueAtTime(master.gain.value, now)
+    master.gain.linearRampToValueAtTime(nextMuted ? 0.0001 : 1, now + 0.025)
+  }
+
+  /**
    * A canyon tail, built once and shared.
    *
    * Reverb is what separates a buzzing synth noise from a sound that seems to
@@ -47,24 +69,30 @@ export function createSfx(): Sfx {
    * air and hillsides actually absorb the high end first.
    */
   let canyon: ConvolverNode | null = null
+  let canyonConnected = false
   function reverb(c: AudioContext): ConvolverNode {
-    if (canyon) return canyon
-    const seconds = 2.4
-    const frames = Math.floor(c.sampleRate * seconds)
-    const impulse = c.createBuffer(2, frames, c.sampleRate)
-    for (let channel = 0; channel < 2; channel++) {
-      const data = impulse.getChannelData(channel)
-      let smoothed = 0
-      for (let i = 0; i < frames; i++) {
-        const decay = Math.pow(1 - i / frames, 2.6)
-        // A one-pole lowpass on the noise, opened wide early and closed as the
-        // tail fades: a bright forever-tail sounds like metal, not mountains.
-        smoothed += ((Math.random() * 2 - 1) - smoothed) * (0.22 + decay * 0.5)
-        data[i] = smoothed * decay
+    if (!canyon) {
+      const seconds = 2.4
+      const frames = Math.floor(c.sampleRate * seconds)
+      const impulse = c.createBuffer(2, frames, c.sampleRate)
+      for (let channel = 0; channel < 2; channel++) {
+        const data = impulse.getChannelData(channel)
+        let smoothed = 0
+        for (let i = 0; i < frames; i++) {
+          const decay = Math.pow(1 - i / frames, 2.6)
+          // A one-pole lowpass on the noise, opened wide early and closed as the
+          // tail fades: a bright forever-tail sounds like metal, not mountains.
+          smoothed += ((Math.random() * 2 - 1) - smoothed) * (0.22 + decay * 0.5)
+          data[i] = smoothed * decay
+        }
       }
+      canyon = c.createConvolver()
+      canyon.buffer = impulse
     }
-    canyon = c.createConvolver()
-    canyon.buffer = impulse
+    if (!canyonConnected) {
+      canyon.connect(masterGain(c))
+      canyonConnected = true
+    }
     return canyon
   }
 
@@ -87,7 +115,7 @@ export function createSfx(): Sfx {
     }
     amp.gain.setValueAtTime(gain, c.currentTime)
     amp.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur)
-    osc.connect(amp).connect(c.destination)
+    osc.connect(amp).connect(masterGain(c))
     osc.start()
     osc.stop(c.currentTime + dur)
   }
@@ -109,7 +137,7 @@ export function createSfx(): Sfx {
     filter.frequency.setValueAtTime(cutoff, c.currentTime)
     const amp = c.createGain()
     amp.gain.setValueAtTime(gain, c.currentTime)
-    src.connect(filter).connect(amp).connect(c.destination)
+    src.connect(filter).connect(amp).connect(masterGain(c))
     src.start()
   }
 
@@ -119,7 +147,7 @@ export function createSfx(): Sfx {
       if (c && c.state === 'suspended') void c.resume()
     },
     setMuted(nextMuted) {
-      muted = nextMuted
+      setMasterMuted(nextMuted)
     },
     whoosh() {
       noise(0.16, 0.16, 1400)
@@ -288,10 +316,10 @@ export function createSfx(): Sfx {
       // Dry signal plus a generous send to the canyon, so it rings out.
       const dry = c.createGain()
       dry.gain.value = 0.82
-      out.connect(dry).connect(c.destination)
+      out.connect(dry).connect(masterGain(c))
       const wet = c.createGain()
       wet.gain.value = 0.5
-      out.connect(wet).connect(reverb(c)).connect(c.destination)
+      out.connect(wet).connect(reverb(c))
     },
     // Distant two-tone toy-train whistle.
     whistle() {

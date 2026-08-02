@@ -26,13 +26,26 @@ import {
 import { createRoarRings } from './roarRings'
 import { createStage } from './scene'
 import { createPlayUi } from './playUi'
-import { createParkBackdrop } from './worlds/parkBackdrop'
-import { createMeadowSlice } from './worlds/meadowSlice'
-import { createStonePath } from './worlds/stonePath'
-import { createWhiteSquirrel } from './worlds/whiteSquirrel'
-import { createWncGarden } from './worlds/wncGarden'
-import { createForegroundFringe } from './worlds/foregroundFringe'
-import { createWncTrees } from './worlds/wncTrees'
+import { createCinematicButterfly } from './worlds/cinematicButterfly'
+import {
+  CINEMATIC_ENVIRONMENT_DISTANCE,
+  cinematicGardenRailHeadY,
+  createCinematicEnvironment,
+} from './worlds/cinematicEnvironment'
+import { createCinematicSquirrel } from './worlds/cinematicSquirrel'
+import {
+  CINEMATIC_TRAIN_DISTANCE,
+  cinematicTrainWheelContactY,
+  createCinematicTrain,
+} from './worlds/cinematicTrain'
+import { GARDEN_DISCOVERIES } from './worlds/gardenDiscoveries'
+import type { ParkBackdrop } from './worlds/parkBackdrop'
+import type { MeadowSlice } from './worlds/meadowSlice'
+import type { StonePath } from './worlds/stonePath'
+import type { WhiteSquirrel } from './worlds/whiteSquirrel'
+import type { WncGarden } from './worlds/wncGarden'
+import type { ForegroundFringe } from './worlds/foregroundFringe'
+import type { WncTrees } from './worlds/wncTrees'
 import { Raycaster, Vector2, Vector3 } from 'three'
 
 declare global {
@@ -70,6 +83,83 @@ const searchParams = new URLSearchParams(window.location.search)
 const forceProcedural = searchParams.get('procedural') === '1'
 const modelDebugTarget = searchParams.get('model')
 const forceModel = modelDebugTarget === '1' || modelDebugTarget === 'v2'
+// The cinematic plate now has more garden and train information worth seeing.
+// Scale the invisible physics driver with the visible hero so the cuff, ball,
+// contact shadow, and pointer target remain a single coherent character.
+const DESKTOP_HERO_SCALE = 0.8
+// The prior primitive-heavy landscape remains available for diagnosis, but the
+// shipping desktop experience uses a coherent authored environment so the
+// world can meet the cougar's image quality without crowding her.
+const useCinematicScenery = searchParams.get('legacyScenery') !== '1'
+// Keep the dependable procedural sky and meadow visible until the authored
+// scenic plate has actually loaded. This avoids a black fullscreen card on a
+// slow connection or an unavailable asset.
+stage.setCinematicEnvironmentMode(false)
+
+// Every world module honours this mutable preference. It must exist before
+// asset work starts so the garden, train, and hero can begin loading in
+// parallel without losing a live OS-motion update.
+const motion = { reducedMotion: false }
+const reducedMotionQuery =
+  typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null
+motion.reducedMotion = reducedMotionQuery?.matches === true
+reducedMotionQuery?.addEventListener('change', (event) => {
+  motion.reducedMotion = event.matches
+})
+
+const cinematicEnvironment = useCinematicScenery ? createCinematicEnvironment() : null
+const cinematicTrain = useCinematicScenery
+  ? createCinematicTrain({
+      // Keep this as a live getter instead of spreading `motion`: the OS
+      // preference can change while the page is open, and the train must stop
+      // with the butterfly and squirrel on the following frame.
+      get reducedMotion() {
+        return motion.reducedMotion
+      },
+      screenY: (activeCamera) => {
+        const camera = activeCamera as typeof stage.camera
+        const railY = cinematicGardenRailHeadY(camera.fov, camera.aspect)
+        // Cards at different camera depths align in projected screen space,
+        // not by copying their local y coordinate directly.
+        return (
+          railY * (CINEMATIC_TRAIN_DISTANCE / CINEMATIC_ENVIRONMENT_DISTANCE) -
+          cinematicTrainWheelContactY()
+        )
+      },
+    })
+  : null
+const cinematicSquirrel = useCinematicScenery ? createCinematicSquirrel() : null
+const cinematicButterfly = useCinematicScenery ? createCinematicButterfly(motion) : null
+let cinematicSceneryReady = false
+let cinematicSquirrelActivated = false
+let cinematicButterflyActivated = false
+
+function syncCinematicCardVisibility(): void {
+  if (!useCinematicScenery) return
+  cinematicTrain!.root.visible = cinematicSceneryReady
+  cinematicSquirrel!.root.visible = cinematicSceneryReady && cinematicSquirrelActivated
+  cinematicButterfly!.root.visible = cinematicSceneryReady && cinematicButterflyActivated
+}
+
+if (useCinematicScenery) {
+  // The fallback sky/meadow is rendered immediately. The real garden and its
+  // dependent cards load in parallel with the hero, but cannot appear until
+  // that garden has faded fully in.
+  syncCinematicCardVisibility()
+  stage.scene.add(
+    cinematicEnvironment!.root,
+    cinematicTrain!.root,
+    cinematicSquirrel!.root,
+    cinematicButterfly!.root,
+  )
+  void cinematicEnvironment!.load()
+  void cinematicTrain!.load()
+  void cinematicButterfly!.load()
+  stage.render()
+}
+
 const modelAssetUrl =
   modelDebugTarget === 'v2'
     ? '/assets/purple-cougar-v2.glb'
@@ -93,6 +183,7 @@ if (forceProcedural) {
   cougar = createHeroDriverQuadruped()
   try {
     heroVisual = await loadHeroBillboard(cougar.root)
+    cougar.root.scale.setScalar(DESKTOP_HERO_SCALE)
     stage.setFlatHeroMode(true)
   } catch (error) {
     console.warn(
@@ -104,57 +195,68 @@ if (forceProcedural) {
   }
 }
 
-// Every world module already honours `reducedMotion`, but nothing had ever set
-// it — the option was wired end to end and never switched on. Read the OS
-// setting and share ONE mutable object with all of them: the modules re-read
-// `options.reducedMotion` each update, so flipping the field mid-session takes
-// effect on the next frame without a reload.
-const motion = { reducedMotion: false }
-const reducedMotionQuery =
-  typeof window.matchMedia === 'function'
-    ? window.matchMedia('(prefers-reduced-motion: reduce)')
-    : null
-motion.reducedMotion = reducedMotionQuery?.matches === true
-reducedMotionQuery?.addEventListener('change', (event) => {
-  motion.reducedMotion = event.matches
-})
-
 const behavior = createCougarBehavior(cougar, {
   initialMood: 'calm',
   neckPivot: { x: 0, y: 0.62, z: 0.34 },
   tailPivot: { x: 0, y: 0.61, z: -0.75 },
 })
 const ballView = createBallView()
-const meadow = createMeadowSlice(motion)
-const backdrop = createParkBackdrop(motion)
 const roarRings = createRoarRings()
-// Western North Carolina dressing: tall natives framing the view, a laid stone
-// walk through the beds, and the Brevard white squirrel who bolts across every
-// so often.
-const trees = createWncTrees(motion)
-const garden = createWncGarden(motion)
-const stonePath = createStonePath(motion)
-const squirrel = createWhiteSquirrel(motion)
-// Near-camera grass framing the bottom corners; see the module header for why
-// its positions are measured rather than authored.
-const foregroundFringe = createForegroundFringe(motion)
-stage.scene.add(
-  backdrop.root,
-  trees.root,
-  garden.root,
-  stonePath.root,
-  meadow.root,
-  squirrel.root,
-  foregroundFringe.root,
-  cougar.root,
-  ballView.group,
-  roarRings.group,
-)
-if (heroVisual) stage.scene.add(heroVisual.root)
-
+let meadow: MeadowSlice | null = null
+let backdrop: ParkBackdrop | null = null
+let trees: WncTrees | null = null
+let garden: WncGarden | null = null
+let stonePath: StonePath | null = null
+let squirrel: WhiteSquirrel | null = null
+let foregroundFringe: ForegroundFringe | null = null
 const ui = createPlayUi(document.body)
+ui.setReducedMotion(motion.reducedMotion)
+ui.setExplorationEnabled(false)
+reducedMotionQuery?.addEventListener('change', (event) => {
+  ui.setReducedMotion(event.matches)
+})
 const sfx = createSfx()
-squirrel.onDashStart(() => sfx.chitter())
+
+if (!useCinematicScenery) {
+  // Keep the prior procedural world reachable for visual comparison without
+  // shipping its 1,700+ mesh construction cost to the default desktop scene.
+  const [
+    { createMeadowSlice },
+    { createParkBackdrop },
+    { createWncTrees },
+    { createWncGarden },
+    { createStonePath },
+    { createWhiteSquirrel },
+    { createForegroundFringe },
+  ] = await Promise.all([
+    import('./worlds/meadowSlice'),
+    import('./worlds/parkBackdrop'),
+    import('./worlds/wncTrees'),
+    import('./worlds/wncGarden'),
+    import('./worlds/stonePath'),
+    import('./worlds/whiteSquirrel'),
+    import('./worlds/foregroundFringe'),
+  ])
+  meadow = createMeadowSlice(motion)
+  backdrop = createParkBackdrop(motion)
+  trees = createWncTrees(motion)
+  garden = createWncGarden(motion)
+  stonePath = createStonePath(motion)
+  squirrel = createWhiteSquirrel(motion)
+  foregroundFringe = createForegroundFringe(motion)
+  stage.scene.add(
+    backdrop.root,
+    trees.root,
+    garden.root,
+    stonePath.root,
+    meadow.root,
+    squirrel.root,
+    foregroundFringe.root,
+  )
+  squirrel.onDashStart(() => sfx.chitter())
+}
+stage.scene.add(cougar.root, ballView.group, roarRings.group)
+if (heroVisual) stage.scene.add(heroVisual.root)
 
 const store = (() => {
   try {
@@ -278,7 +380,7 @@ function launchFromGesture(dx: number, dy: number): void {
 }
 
 function guideBallToRamp(): void {
-  if (!COURSE_ENABLED) return
+  if (!COURSE_ENABLED || !meadow) return
   const target = meadow.ramp.center
   const dx = target.x - ball.pos.x
   const dz = target.z - ball.pos.z
@@ -289,7 +391,7 @@ function guideBallToRamp(): void {
 }
 
 function launchTowardBell(force = false): void {
-  if (!COURSE_ENABLED) return
+  if (!COURSE_ENABLED || !meadow) return
   if (launchedFromRamp && !force) return
   launchedFromRamp = true
   lastBellGuidanceAt = elapsed
@@ -313,6 +415,7 @@ function launchTowardBell(force = false): void {
 }
 
 function isOverRamp(): boolean {
+  if (!meadow) return false
   const { center, width, depth } = meadow.ramp
   return (
     Math.abs(ball.pos.x - center.x) <= width * 0.5 + BALL_RADIUS &&
@@ -322,7 +425,7 @@ function isOverRamp(): boolean {
 
 /** A simple, bounded surface assist for the authored first-playable ramp. */
 function applyRampSurface(): void {
-  if (!COURSE_ENABLED || !story.snapshot().rampReady || !isOverRamp()) return
+  if (!COURSE_ENABLED || !meadow || !story.snapshot().rampReady || !isOverRamp()) return
   const { center, depth, rise } = meadow.ramp
   const localZ = ball.pos.z - center.z
   const normalized = Math.max(0, Math.min(1, 0.5 - localZ / depth))
@@ -356,6 +459,17 @@ function handleStoryEvents(events: readonly PlayEvent[]): void {
         ballView.setInviting(false)
         behavior.setMood('excited', 0.2)
         reactCougar('surprised', 0.8)
+        ui.setExplorationEnabled(true)
+        if (useCinematicScenery && !cinematicSquirrelActivated) {
+          cinematicSquirrelActivated = true
+          // Its first run belongs to the discoverable world, not the inactive
+          // opening sequence where a child cannot tap it yet.
+          cinematicSquirrel!.activate(elapsed)
+        }
+        if (useCinematicScenery && !cinematicButterflyActivated) {
+          cinematicButterflyActivated = true
+        }
+        if (useCinematicScenery) syncCinematicCardVisibility()
         break
       case 'bounce':
         sfx.bounce()
@@ -370,6 +484,10 @@ function handleStoryEvents(events: readonly PlayEvent[]): void {
         if (COURSE_ENABLED) {
           ui.showRampReady()
           guideBallToRamp()
+        } else {
+          // The ramp is deliberately absent from the focused desktop scene.
+          // Complete the play loop without inventing an invisible bell target.
+          handleStoryEvents(story.completeWithoutCourse())
         }
         break
       case 'bell-rung':
@@ -385,7 +503,7 @@ function handleStoryEvents(events: readonly PlayEvent[]): void {
         break
       case 'train-tease':
         behavior.setMood('curious', 0.5)
-        ui.announce('A friendly train appears in the distance.')
+        ui.announce('Purple Mountain Express is rolling through the mountains.')
         break
     }
   }
@@ -408,6 +526,18 @@ const tapNdc = new Vector2()
 const roarOrigin = new Vector3()
 const cameraRight = new Vector3()
 const cameraToward = new Vector3()
+let lastButterflyDiscoveryAt = Number.NEGATIVE_INFINITY
+let gardenDiscoveryCursor = 0
+
+function canExploreWorld(): boolean {
+  const phase = story.snapshot().phase
+  return (
+    phase === 'playing' ||
+    phase === 'ramp-ready' ||
+    phase === 'celebrating' ||
+    phase === 'free-play'
+  )
+}
 
 function roarNow(intensity = 1.2): void {
   lastRoarAt = elapsed
@@ -460,11 +590,119 @@ function tryCougarTap(clientX: number, clientY: number): boolean {
 }
 const ballPoint = new Vector3()
 
+/**
+ * A tap on the living world should teach or delight before it turns into a
+ * generic ball tap. These targets live at the garden edges or far depth, so
+ * they never steal the cougar/ball's central play space.
+ */
+function tryCinematicWorldTap(clientX: number, clientY: number): boolean {
+  // The wake and first ball beat establish Purple Cougar as the hero. World
+  // facts intentionally unlock only once that compact story is in play.
+  if (!useCinematicScenery || !cinematicSceneryReady || !canExploreWorld()) return false
+  const rect = stage.renderer.domElement.getBoundingClientRect()
+  if (rect.width < 1 || rect.height < 1) return false
+
+  const normalizedX = (clientX - rect.left) / rect.width
+  const normalizedY = (clientY - rect.top) / rect.height
+  if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY)) return false
+
+  tapNdc.set(normalizedX * 2 - 1, -normalizedY * 2 + 1)
+  tapRaycaster.setFromCamera(tapNdc, stage.camera)
+
+  // The ball is the core toy. A world layer can be visually behind it, but a
+  // plain geometric raycast cannot see the depth buffer, so preserve ball
+  // priority explicitly before comparing background discovery cards.
+  if (
+    tapRaycaster.ray.distanceToPoint(ballPoint.set(ball.pos.x, ball.pos.y, ball.pos.z)) <
+    BALL_RADIUS * 2.4
+  ) {
+    return false
+  }
+
+  // Each card filters its own transparent padding using authored UV regions.
+  // Sort the remaining actual subject hits by camera distance so a near
+  // butterfly never loses to a farther train merely due to code order.
+  const squirrelHit = cinematicSquirrel?.hitTest(tapRaycaster)
+  const butterflyHit = cinematicButterfly?.hitTest(tapRaycaster)
+  const trainHit = cinematicTrain?.hitTest(tapRaycaster)
+  const cardCandidates = [
+    squirrelHit ? { kind: 'squirrel' as const, distance: squirrelHit.distance } : null,
+    butterflyHit ? { kind: 'butterfly' as const, distance: butterflyHit.distance } : null,
+    trainHit ? { kind: 'train' as const, distance: trainHit.distance } : null,
+  ].filter((candidate): candidate is { kind: 'squirrel' | 'butterfly' | 'train'; distance: number } => candidate !== null)
+  const nearestCard = cardCandidates.reduce<typeof cardCandidates[number] | null>(
+    (nearest, candidate) => (!nearest || candidate.distance < nearest.distance ? candidate : nearest),
+    null,
+  )
+
+  switch (nearestCard?.kind) {
+    case 'squirrel':
+      if (!cinematicSquirrel?.discover(elapsed)) return false
+      sfx.chitter()
+      behavior.setMood('curious', 0.38)
+      ui.showDiscovery(
+        'You found the white squirrel!',
+        'Brevard white squirrel',
+        'A squirrel uses its big fluffy tail to balance while it leaps.',
+      )
+      return true
+    case 'butterfly':
+      // Keep a freshly found butterfly magical rather than repeatedly opening
+      // the same card while it hovers over a flower.
+      if (elapsed - lastButterflyDiscoveryAt < 5.7) return true
+      lastButterflyDiscoveryAt = elapsed
+      sfx.whoosh()
+      behavior.setMood('curious', 0.3)
+      ui.showDiscovery(
+        'Eastern tiger swallowtail',
+        'Papilio glaucus',
+        'A butterfly tastes with its feet before it sips nectar from a flower.',
+      )
+      return true
+    case 'train':
+      sfx.whistle()
+      behavior.setMood('curious', 0.45)
+      ui.showDiscovery(
+        'Purple Mountain Express',
+        'Steam excursion train',
+        'Steam pushes the pistons, and the pistons turn the train wheels.',
+      )
+      return true
+  }
+
+  // Background scenery is intentionally visual-only. Invisible broad zones
+  // made ordinary ball taps feel unreliable; only real train/animal artwork
+  // and the explicit Explore control may open a learning fact.
+  return false
+}
+
+function exploreNextGardenFact(): void {
+  if (!canExploreWorld()) {
+    ui.announce('Play with Purple Cougar and the ball first.')
+    return
+  }
+  const discovery = GARDEN_DISCOVERIES[gardenDiscoveryCursor % GARDEN_DISCOVERIES.length]
+  if (!discovery) return
+  gardenDiscoveryCursor += 1
+  behavior.setMood('curious', 0.22)
+  ui.showDiscovery(discovery.commonName, discovery.botanicalName, discovery.fact)
+}
+
+ui.onExplore(exploreNextGardenFact)
+
+function targetsInteractiveControl(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest('button, input, select, textarea, a[href], [role="button"]') !== null
+  )
+}
+
 // --- Input. The full playfield stays forgiving; a drag becomes a controlled fling. ---
 let downAt: { x: number; y: number; pointerId: number } | null = null
 
 host.addEventListener('pointerdown', (event) => {
   if (event.pointerType === 'mouse' && event.button !== 0) return
+  if (targetsInteractiveControl(event.target)) return
   sfx.unlock()
   downAt = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
   try {
@@ -480,9 +718,10 @@ host.addEventListener('pointerup', (event) => {
   const dy = event.clientY - downAt.y
   downAt = null
   const isTap = Math.hypot(dx, dy) < 24
-  // A plain tap landing on Purple Cougar herself is hers — she roars. Drags
-  // always stay ball gestures so flinging across her body keeps working.
+  // A plain tap may discover a world detail or belong to Purple Cougar herself.
+  // Drags always stay ball gestures so flinging across her body keeps working.
   if (isTap && tryCougarTap(event.clientX, event.clientY)) return
+  if (isTap && tryCinematicWorldTap(event.clientX, event.clientY)) return
   const storyEvents = story.tap()
   handleStoryEvents(storyEvents)
   if (!storyEvents.some((entry) => entry.type === 'ball-tapped')) return
@@ -499,6 +738,8 @@ host.addEventListener('lostpointercapture', () => {
 })
 
 window.addEventListener('keydown', (event) => {
+  if (targetsInteractiveControl(event.target)) return
+  if (event.repeat) return
   if (event.code === 'Space' || event.code === 'Enter') {
     event.preventDefault()
     handleTap()
@@ -527,10 +768,12 @@ function frame(now: number): void {
   behavior.update(frameDt, { lookAt: ball.pos })
   heroVisual?.update(frameDt, stage.camera, cougar.root)
   roarRings.update(frameDt, stage.camera)
-  trees.update(elapsed, frameDt)
-  garden.update(elapsed, frameDt)
-  stonePath.update(elapsed, frameDt)
-  squirrel.update(elapsed, frameDt)
+  if (!useCinematicScenery && meadow) {
+    trees!.update(elapsed, frameDt)
+    garden!.update(elapsed, frameDt)
+    stonePath!.update(elapsed, frameDt)
+    squirrel!.update(elapsed, frameDt)
+  }
   syncCuffs()
 
   while (accumulator >= PHYS_DT) {
@@ -544,13 +787,15 @@ function frame(now: number): void {
     accumulator -= PHYS_DT
   }
 
-  const bellStrike = meadow.update(elapsed, frameDt, {
-    position: ball.pos,
-    velocity: ball.vel,
-    radius: BALL_RADIUS,
-  })
-  if (bellStrike && story.snapshot().rampReady) {
-    handleStoryEvents(story.update(0, false, true))
+  if (!useCinematicScenery && meadow) {
+    const bellStrike = meadow.update(elapsed, frameDt, {
+      position: ball.pos,
+      velocity: ball.vel,
+      radius: BALL_RADIUS,
+    })
+    if (bellStrike && story.snapshot().rampReady) {
+      handleStoryEvents(story.update(0, false, true))
+    }
   }
 
   // If the gentle ramp toss never finds its surface, guide it toward the bell
@@ -570,9 +815,21 @@ function frame(now: number): void {
   wasMoving = moving
 
   ballView.update(ball, visualCuff, frameDt)
-  backdrop.update(elapsed, frameDt)
-  foregroundFringe.update(elapsed, frameDt)
   camera.update(frameDt, { x: 0, y: 0.52, z: -0.18 }, ball.pos, speed(ball))
+  if (useCinematicScenery) {
+    cinematicEnvironment!.update(stage.camera, elapsed, motion.reducedMotion)
+    if (!cinematicSceneryReady && cinematicEnvironment!.isFullyVisible()) {
+      stage.setCinematicEnvironmentMode(true)
+      cinematicSceneryReady = true
+      syncCinematicCardVisibility()
+    }
+    cinematicTrain!.update(stage.camera, elapsed)
+    cinematicSquirrel!.update(stage.camera, elapsed, motion.reducedMotion)
+    cinematicButterfly!.update(stage.camera, elapsed)
+  } else {
+    backdrop!.update(elapsed, frameDt)
+    foregroundFringe!.update(elapsed, frameDt)
+  }
   stage.render()
 
   requestAnimationFrame(frame)
@@ -607,7 +864,10 @@ window.__pc = {
   setCameraAzimuth: (deg) => camera.setAzimuth(deg),
   roar: () => roarNow(),
   cameraPos: () => stage.camera.position.toArray() as [number, number, number],
-  squirrelDash: () => squirrel.dashNow(),
+  squirrelDash: () => {
+    if (useCinematicScenery) cinematicSquirrel!.dashNow(elapsed)
+    else squirrel!.dashNow()
+  },
   // Where does a world point land on screen? Scene dressing has to be framed
   // against the live camera, not against the authored constants — the follow
   // camera moves. -1..1, x right, y up.

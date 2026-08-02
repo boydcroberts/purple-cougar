@@ -55,6 +55,7 @@ interface BackdropMaterials {
   readonly middleHill: MeshStandardMaterial
   readonly nearHill: MeshStandardMaterial
   readonly lake: MeshStandardMaterial
+  readonly lakeGlint: MeshBasicMaterial
   readonly cloud: MeshBasicMaterial
   readonly cloudShade: MeshBasicMaterial
   /** Distinct cumulus silhouettes. Empty only where there is no DOM to paint on. */
@@ -106,10 +107,16 @@ function makeMaterials(): BackdropMaterials {
     middleHill: standard(0x6f9e5f),
     nearHill: standard(0x568a56),
     lake: new MeshStandardMaterial({
-      color: 0x86b6cf,
-      roughness: 0.18,
-      metalness: 0.15,
+      color: 0x5c91a8,
+      roughness: 0.26,
+      metalness: 0.12,
       flatShading: false,
+    }),
+    lakeGlint: new MeshBasicMaterial({
+      color: 0xffe1a4,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
     }),
     cloud: new MeshBasicMaterial({ color: 0xf5fbf5 }),
     cloudShade: new MeshBasicMaterial({ color: 0xcfe6e8 }),
@@ -700,6 +707,26 @@ export function createParkBackdrop(options: ParkBackdropOptions = {}): ParkBackd
   lake.position.set(0, 0.03, -3.6)
   lake.receiveShadow = true
   root.add(lake)
+  // The reference water catches short warm streaks below the sun rather than
+  // reading as a single painted blue field. Keep these sparse and irregular:
+  // they clarify the water from the Meadow without turning it into glitter.
+  const glintGeometry = new BoxGeometry(1, 0.008, 0.035)
+  for (const [x, z, length] of [
+    [-5.8, -7.3, 1.4],
+    [-3.9, -5.8, 0.9],
+    [-1.7, -7.1, 1.65],
+    [0.5, -5.3, 1.1],
+    [2.9, -7.9, 1.5],
+    [5.4, -5.9, 0.72],
+    [6.7, -7.0, 1.16],
+  ] as const) {
+    const glint = new Mesh(glintGeometry, materials.lakeGlint)
+    glint.name = 'Warm lake reflection'
+    glint.position.set(x, 0.085, z)
+    glint.scale.x = length
+    glint.rotation.y = (random() - 0.5) * 0.08
+    root.add(glint)
+  }
   const lakePositions = lakeGeometry.getAttribute('position') as BufferAttribute
   const lakeRest = new Float32Array(lakePositions.array)
 

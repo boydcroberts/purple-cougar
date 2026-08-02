@@ -286,18 +286,14 @@ function addDistantTrain(parent: Group, materials: MeadowMaterials): {
 } {
   const train = new Group()
   train.name = 'Friendly train on rainbow bridge'
-  // Desktop hero framing needs clear air around the cougar's face. Keep the
-  // train legible as a moving story beat, but firmly distant and screen-right
-  // so the cabin, smoke, and bridge frame rather than cross the silhouette.
-  // Raised high enough that the travelling engine stays visible above the
-  // cougar's back instead of vanishing behind her for half of every crossing,
-  // but set further back and smaller than it once was: at its old size it ran
-  // straight through the horizon band and left the Blue Ridge no room at all.
-  train.position.set(-1.0, 0.78, -7.6)
+  // The train belongs on the far shore. The lake is the Meadow's new scenic
+  // reveal, so its bridge must read as a small promise beyond the water rather
+  // than a close, full-width wall across Purple Cougar's horizon.
+  train.position.set(-1.0, 0.42, -14.5)
   // The group scales about its own origin, which sits level with the deck
   // (local y 0.02), so growing it keeps the rails at the same world height and
   // only sinks the piers further below the meadow floor, where they are hidden.
-  train.scale.setScalar(1.05)
+  train.scale.setScalar(0.78)
 
   // The deck spans well past both edges of every supported framing so the
   // continuously travelling train never visibly runs out of track. It reaches

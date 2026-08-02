@@ -3,6 +3,7 @@ import { createCougarBehavior } from '../src/cougar/behavior'
 import {
   createHeroDriverQuadruped,
   deformHeroPoint,
+  isHeroHitUv,
   type HeroDeformationPose,
 } from '../src/cougar/heroBillboard'
 
@@ -17,6 +18,13 @@ const neutralPose: HeroDeformationPose = {
 }
 
 describe('reference-matched hero driver', () => {
+  it('does not treat transparent outer image padding as the cougar', () => {
+    expect(isHeroHitUv(0.5, 0.5)).toBe(true)
+    expect(isHeroHitUv(0.01, 0.5)).toBe(false)
+    expect(isHeroHitUv(0.5, 0.99)).toBe(false)
+    expect(isHeroHitUv(0.5, 0.01)).toBe(false)
+  })
+
   it('preserves the quadruped rig contract without loading the 3D model', () => {
     const driver = createHeroDriverQuadruped()
 

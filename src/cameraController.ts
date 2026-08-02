@@ -14,12 +14,13 @@ export interface FollowCamera {
   reset(): void
 }
 
-// Desktop is currently a character-review view. Keep Purple Cougar large
-// enough to read as the hero before reintroducing more world detail.
+// The Meadow now reads from a small bluff above the lake. The higher angle
+// preserves Purple Cougar as the hero while letting the water remain a real,
+// visible destination beyond the garden rather than a hidden blue sliver.
 const BASE_DISTANCE = 2.78
-const BASE_HEIGHT = 0.95
+const BASE_HEIGHT = 1.35
 const BASE_AZIMUTH = Math.atan2(2.35, 3.05)
-const LOOK_HEIGHT = 0.47
+const LOOK_HEIGHT = 0.43
 const LOOK_SMOOTHNESS = 5.4
 const CAMERA_SMOOTHNESS = 4.2
 
@@ -40,9 +41,16 @@ export function createFollowCamera(camera: PerspectiveCamera): FollowCamera {
     return BASE_DISTANCE * (1 + narrowness * 1.6)
   }
 
+  function portraitFramingOffset(): number {
+    // The three-quarter hero pose leans toward screen-left. On a phone, a
+    // slight look-target shift keeps her face in frame while preserving the
+    // ball's generous tap space on the right.
+    return -Math.max(0, 0.68 - camera.aspect) * 1.45
+  }
+
   function reset(): void {
     azimuth = BASE_AZIMUTH
-    lookTarget.set(0, LOOK_HEIGHT, -0.18)
+    lookTarget.set(portraitFramingOffset(), LOOK_HEIGHT, -0.18)
     const distance = framingDistance()
     camera.position.set(
       Math.sin(azimuth) * distance,
@@ -61,7 +69,7 @@ export function createFollowCamera(camera: PerspectiveCamera): FollowCamera {
       // influence is deliberately capped so Purple Cougar remains the hero.
       const attention = Math.min(0.28, Math.max(0, (ballSpeed - 1.2) * 0.035))
       desiredLook.set(
-        cougar.x + (ball.x - cougar.x) * attention,
+        cougar.x + (ball.x - cougar.x) * attention + portraitFramingOffset(),
         LOOK_HEIGHT + Math.max(-0.08, Math.min(0.18, (ball.y - LOOK_HEIGHT) * attention)),
         cougar.z + (ball.z - cougar.z) * attention - 0.18,
       )

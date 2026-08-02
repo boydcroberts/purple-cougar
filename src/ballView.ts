@@ -242,8 +242,9 @@ export function createBallView(): BallView {
   let elapsed = 0
 
   function update(state: BallPhysics, anchor: Vec3, dt = 1 / 60): void {
-    elapsed += Math.max(0, Math.min(dt, 0.05))
-    celebration = Math.max(0, celebration - dt)
+    const frameDt = Math.max(0, Math.min(dt, 0.05))
+    elapsed += frameDt
+    celebration = Math.max(0, celebration - frameDt)
     ball.position.set(state.pos.x, state.pos.y, state.pos.z)
 
     // Grounding blob: full strength on the grass, spreading and fading as the
@@ -261,7 +262,9 @@ export function createBallView(): BallView {
       spinAxis.set(state.vel.x, state.vel.y, state.vel.z).normalize().cross(up)
       if (spinAxis.lengthSq() > 1e-8) {
         spinAxis.normalize()
-        q.setFromAxisAngle(spinAxis, (v / BALL_RADIUS) / 60)
+        // Angular velocity is radians per second, so use the actual clamped
+        // render delta rather than a fixed 60 Hz step.
+        q.setFromAxisAngle(spinAxis, (v / BALL_RADIUS) * frameDt)
         ball.quaternion.premultiply(q)
       }
     }

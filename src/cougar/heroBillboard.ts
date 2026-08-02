@@ -10,6 +10,7 @@ import {
   BufferAttribute,
   CanvasTexture,
   DoubleSide,
+  DynamicDrawUsage,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -36,6 +37,13 @@ const CUFF_LOCAL_X = (0.722 - 0.5) * PLANE_WIDTH
 const CUFF_LOCAL_Y = (0.5 - 0.761) * PLANE_HEIGHT
 const HERO_PIXEL_WIDTH = 1402
 const HERO_PIXEL_HEIGHT = 1122
+// Pixel-measured nontransparent trim of the authored WebP. This cheap first
+// pass rejects the large transparent margin before the generous hero hit test
+// can consume a ball or world-discovery tap.
+const HERO_ALPHA_MIN_U = 71 / HERO_PIXEL_WIDTH
+const HERO_ALPHA_MAX_U = (71 + 1309) / HERO_PIXEL_WIDTH
+const HERO_ALPHA_MIN_SOURCE_Y = 91 / HERO_PIXEL_HEIGHT
+const HERO_ALPHA_MAX_SOURCE_Y = (91 + 940) / HERO_PIXEL_HEIGHT
 const TAIL_CENTERLINE = [
   [0.745, 0.603],
   [0.785, 0.483],
@@ -79,6 +87,18 @@ export interface HeroBillboard {
   /** Generous child-friendly test: does this pointer ray touch the hero card? */
   hitTest(raycaster: Raycaster): boolean
   dispose(): void
+}
+
+/** Reject the known transparent border around the authored hero image. */
+export function isHeroHitUv(u: number, v: number): boolean {
+  if (!Number.isFinite(u) || !Number.isFinite(v) || u < 0 || u > 1 || v < 0 || v > 1) return false
+  const sourceY = 1 - v
+  return (
+    u >= HERO_ALPHA_MIN_U &&
+    u <= HERO_ALPHA_MAX_U &&
+    sourceY >= HERO_ALPHA_MIN_SOURCE_Y &&
+    sourceY <= HERO_ALPHA_MAX_SOURCE_Y
+  )
 }
 
 /**
@@ -381,6 +401,7 @@ export async function loadHeroBillboard(
   const rigScale = new Vector3()
   const cameraPosition = new Vector3()
   const positionAttribute = geometry.getAttribute('position') as BufferAttribute
+  positionAttribute.setUsage(DynamicDrawUsage)
   const uvAttribute = geometry.getAttribute('uv') as BufferAttribute
   const restPositions = new Float32Array(positionAttribute.array)
   const deformedPoint: MutableHeroPoint = { x: 0, y: 0 }
@@ -405,7 +426,7 @@ export async function loadHeroBillboard(
     camera.getWorldPosition(cameraPosition)
 
     root.position.copy(rigPosition)
-    root.scale.set(rigScale.x, rigScale.y, 1)
+    root.scale.set(rigScale.x, rigScale.y, rigScale.z)
 
     // Yaw-only billboarding keeps every paw planted on the world ground. A
     // full lookAt would pitch the image toward the elevated camera and make
@@ -559,7 +580,8 @@ export async function loadHeroBillboard(
       cuffAnchor.getWorldPosition(target)
     },
     hitTest(raycaster) {
-      return raycaster.intersectObject(plane, false).length > 0
+      const hit = raycaster.intersectObject(plane, false)[0]
+      return hit?.uv !== undefined && isHeroHitUv(hit.uv.x, hit.uv.y)
     },
     dispose() {
       for (const [mesh, visible] of previousMeshVisibility) {

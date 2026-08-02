@@ -34,4 +34,17 @@ describe('BouncingBallDirector', () => {
     expect(story.update(0, true, false)).toEqual([])
     expect(story.snapshot().bounces).toBe(0)
   })
+
+  it('can complete the focused no-course desktop loop without a fake bell', () => {
+    const story = new BouncingBallDirector()
+    story.tap()
+    story.update(WAKE_DUR, false, false)
+    story.tap()
+
+    for (let i = 0; i < BOUNCES_TO_RAMP; i++) story.update(0, true, false)
+    expect(story.snapshot().phase).toBe('ramp-ready')
+    expect(story.completeWithoutCourse()).toEqual([{ type: 'celebrate' }])
+    expect(story.update(CELEBRATE_DUR, false, false)).toEqual([{ type: 'train-tease' }])
+    expect(story.snapshot().phase).toBe('free-play')
+  })
 })

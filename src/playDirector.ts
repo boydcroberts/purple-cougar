@@ -69,6 +69,17 @@ export class BouncingBallDirector {
     }
   }
 
+  /**
+   * Completes the third-bounce beat when a scene intentionally omits the
+   * optional physical ramp and bell. It never emits a fake bell event.
+   */
+  completeWithoutCourse(): PlayEvent[] {
+    if (this.phase !== 'ramp-ready') return []
+    this.phase = 'celebrating'
+    this.phaseTime = 0
+    return [{ type: 'celebrate' }]
+  }
+
   /** Advance narrative time and feed in the two meaningful physical events. */
   update(dt: number, ballBounced: boolean, bellHit: boolean): PlayEvent[] {
     const events: PlayEvent[] = []
