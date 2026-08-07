@@ -36,7 +36,10 @@ describe('cinematic garden life', () => {
 
     life.update(camera, 1)
     life.root.updateWorldMatrix(true, true)
-    expect(life.root.getObjectByName('Cinematic foreground botanical frame')).toBeTruthy()
+    // The near botanical frame was cut: flat-shaded blades and circle petals
+    // read as artifacts over the authored photoreal plate. Assert it stays cut.
+    expect(life.root.getObjectByName('Cinematic foreground botanical frame')).toBeFalsy()
+    expect(life.root.getObjectByName('Cinematic garden pollen layer')).toBeTruthy()
     const pollenWorld = life.pollen.getWorldPosition(new Vector3())
     const expected = new Vector3()
     const forward = new Vector3()

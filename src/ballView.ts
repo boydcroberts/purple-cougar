@@ -16,13 +16,11 @@ import {
   BackSide,
   BufferGeometry,
   CanvasTexture,
-  CircleGeometry,
   DoubleSide,
   DynamicDrawUsage,
   Float32BufferAttribute,
   Group,
   Mesh,
-  MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
   Quaternion,
@@ -32,15 +30,19 @@ import {
   Vector3,
 } from 'three'
 import { BALL_RADIUS, CORD_LENGTH } from './constants'
+import { createContactShadow } from './contactShadow'
 import type { BallPhysics, Vec3 } from './physics'
 
-// Matched directly against the owner's physical reference toy: a matte,
-// slightly dusty pumpkin-orange rubber ball with olive-green (not
-// kelly-green) hand-painted stripes, and a near-black bent-wire loop and cord
-// rather than a soft fabric cord.
-const BALL_ORANGE = '#d1732c'
-const STRIPE_GREEN = '#5c7a3a'
+// Re-measured against docs/reference/ball-cord-cuff.jpeg. The real toy is a
+// bright, saturated orange — the previous dusty pumpkin read as brown against
+// the plate's sunlit lawn — and its green is a mid grass-green, not olive.
+const BALL_ORANGE = '#ef7a34'
+const STRIPE_GREEN = '#5d9137'
 const WIRE_COLOR = 0x201f1d
+// Darkness of the ball's blob when it is sitting still on the grass. Kept as a
+// named constant because `update()` has to rebuild it from scratch every frame
+// as the ball climbs, and the two values must not drift apart.
+const BALL_SHADOW_STRENGTH = 0.92
 const TWO_PI = Math.PI * 2
 
 /** Orange with wavy, hand-painted-looking olive stripes — drawn, never loaded. */
@@ -52,29 +54,32 @@ function ballTexture(): CanvasTexture {
   g.fillStyle = BALL_ORANGE
   g.fillRect(0, 0, 512, 256)
 
-  // The reference stripes wobble as they wrap the ball rather than tracking a
-  // perfect great circle — that wobble is exactly what reads as hand-painted
-  // instead of printed. Each stripe gets its own amplitude/frequency/phase so
-  // the three don't wave in obvious lockstep.
+  // The reference stripes are four THIN lines clustered in a band across the
+  // upper third of the ball, wrapping it the short way round — not thick
+  // meridians running pole to pole, which is what the previous pass drew and
+  // which showed as a single fat squiggle on the camera-facing side.
+  //
+  // The sphere's v runs 0 at the south pole to 1 at the north, and canvas y is
+  // 1 - v, so the band lives in the upper quarter of the canvas. Every wobble
+  // frequency is an integer so the stripe meets itself cleanly at the seam.
   g.strokeStyle = STRIPE_GREEN
-  g.lineWidth = 15
+  g.lineWidth = 6
   g.lineCap = 'round'
   g.lineJoin = 'round'
-  const stripeWaves: ReadonlyArray<readonly [number, number, number]> = [
-    [17, 3.1, 0.4],
-    [13, 2.6, 2.1],
-    [19, 3.6, 4.4],
+  const stripeBands: ReadonlyArray<readonly [number, number, number]> = [
+    [62, 5, 0.4],
+    [76, 4, 2.1],
+    [90, 6, 4.4],
+    [104, 3, 5.6],
   ]
-  for (let i = 0; i < stripeWaves.length; i++) {
-    const [amplitude, frequency, phase] = stripeWaves[i]!
-    const baseX = (i / stripeWaves.length) * 512 + 34
+  for (const [baseY, turns, phase] of stripeBands) {
     g.beginPath()
-    for (let step = 0; step <= 32; step++) {
-      const y = (step / 32) * 256
-      const wobble = Math.sin((step / 32) * TWO_PI * (frequency / 2) + phase) * amplitude
-      // The original slight overall lean, so the wobble reads as riding on
-      // top of a curve around the sphere rather than a flat squiggle.
-      const x = baseX + (step / 32) * 28 + wobble
+    for (let step = 0; step <= 96; step++) {
+      const u = step / 96
+      const x = u * 512
+      // The wobble amplitude rides on the wrap so each stripe drifts a little
+      // as it circles, exactly like a stripe painted freehand on a ball.
+      const y = baseY + Math.sin(u * TWO_PI * turns + phase) * 9
       if (step === 0) g.moveTo(x, y)
       else g.lineTo(x, y)
     }
@@ -111,28 +116,16 @@ export function createBallView(): BallView {
   ball.castShadow = true
   group.add(ball)
 
-  // A soft blob shadow pinned to the grass under the ball. The sun's shadow
-  // map is tuned tight around the cougar, so a small fast-moving sphere can
-  // read as floating without this cheap, always-present grounding cue.
-  const contactCanvas = document.createElement('canvas')
-  contactCanvas.width = 128
-  contactCanvas.height = 128
-  const contactContext = contactCanvas.getContext('2d')!
-  const contactGradient = contactContext.createRadialGradient(64, 64, 6, 64, 64, 62)
-  contactGradient.addColorStop(0, 'rgba(20, 40, 16, 0.55)')
-  contactGradient.addColorStop(0.6, 'rgba(20, 40, 16, 0.28)')
-  contactGradient.addColorStop(1, 'rgba(20, 40, 16, 0)')
-  contactContext.fillStyle = contactGradient
-  contactContext.fillRect(0, 0, 128, 128)
-  const contactShadowMaterial = new MeshBasicMaterial({
-    map: new CanvasTexture(contactCanvas),
-    transparent: true,
-    depthWrite: false,
+  // With the cinematic plate up there is no shadow-receiving ground left in the
+  // scene at all, so this painted blob is the ball's only grounding cue. It
+  // shares the hero's helper so both actors agree on the plate's sun direction
+  // and on what a grass shadow is coloured like.
+  const contactShadow = createContactShadow({
+    length: BALL_RADIUS * 4.2,
+    width: BALL_RADIUS * 2.8,
+    strength: BALL_SHADOW_STRENGTH,
   })
-  const contactShadow = new Mesh(new CircleGeometry(BALL_RADIUS * 1.5, 24), contactShadowMaterial)
-  contactShadow.rotation.x = -Math.PI / 2
-  contactShadow.position.y = 0.006
-  group.add(contactShadow)
+  group.add(contactShadow.mesh)
 
   // A quiet pulse gives a non-reading child a clear, friendly invitation.
   // It is attached to the ball so it stays meaningful even when the ball is
@@ -183,7 +176,9 @@ export function createBallView(): BallView {
   // still updating in place with no frame-by-frame geometry allocation.
   const cordPoints = 25
   const cordSides = 6
-  const cordRadius = 0.008
+  // The reference cord is fine black elastic, not rope. It reads at desktop
+  // distance because it is dark against a lit lawn, not because it is thick.
+  const cordRadius = 0.0058
   const cordGeometry = new BufferGeometry()
   // The smooth sag (pass 1) is kept separate from the final, coiled centers
   // (pass 2) so the coil can estimate a clean tangent without feeding back on
@@ -249,13 +244,12 @@ export function createBallView(): BallView {
 
     // Grounding blob: full strength on the grass, spreading and fading as the
     // ball climbs, gone entirely by the top of a bounce.
-    contactShadow.position.x = state.pos.x
-    contactShadow.position.z = state.pos.z
+    contactShadow.setGroundPosition(state.pos.x, state.pos.z)
     const height = Math.max(0, state.pos.y - BALL_RADIUS)
     const grounded = Math.max(0, 1 - height / 1.1)
-    contactShadowMaterial.opacity = grounded * grounded
+    contactShadow.material.opacity = BALL_SHADOW_STRENGTH * grounded * grounded
     const spread = 1 + height * 0.45
-    contactShadow.scale.set(spread, spread, 1)
+    contactShadow.mesh.scale.set(spread, spread, 1)
 
     const v = Math.hypot(state.vel.x, state.vel.y, state.vel.z)
     if (v > 1e-4) {
@@ -305,7 +299,7 @@ export function createBallView(): BallView {
     // from the ball or the cuff, and growing with slack so the wire coils up
     // when loose and straightens as it's drawn taut — same idea as a real
     // bent-wire toy cord.
-    const coilAmplitude = Math.min(0.05, Math.max(0, slack * 0.9))
+    const coilAmplitude = Math.min(0.082, Math.max(0, slack * 1.15))
     for (let i = 0; i < cordPoints; i++) {
       const offset = i * 3
       const before = Math.max(0, i - 1) * 3
@@ -324,8 +318,11 @@ export function createBallView(): BallView {
 
       const t = i / (cordPoints - 1)
       const envelope = Math.sin(Math.PI * t) * coilAmplitude
-      const turn1 = t * TWO_PI * 3.1
-      const turn2 = t * TWO_PI * 5.3 + 1.7
+      // The photo shows two or three large lazy loops, not a tight zigzag.
+      // Halving these frequencies was the whole difference between "toy cord"
+      // and "cartoon lightning bolt".
+      const turn1 = t * TWO_PI * 1.45
+      const turn2 = t * TWO_PI * 2.6 + 1.7
       const offSide = envelope * (0.7 * Math.sin(turn1) + 0.3 * Math.sin(turn2))
       const offUp = envelope * (0.7 * Math.cos(turn1 * 0.9) + 0.3 * Math.cos(turn2 * 1.3 + 0.5))
 

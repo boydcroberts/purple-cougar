@@ -52,11 +52,34 @@ const DEFAULT_HALF_VIEWPORT_WIDTH = 10
 const INITIAL_PROGRESS = 0.44
 const REDUCED_MOTION_PROGRESS = 0.58
 
+// The plate only paints a railway across its right half — a stone viaduct over
+// the gorge, and a cutting that disappears behind the conifers. Running the
+// full viewport span sent the locomotive gliding across open lake, mountains,
+// and sunset sky with nothing under its wheels. Travel now begins inside that
+// tree line, so it emerges from the forest instead of out of nothing.
+// Progress 0 puts the locomotive's nose level with the painted tunnel mouth,
+// so the whole card starts inside the mountain.
+const TRAVEL_START_FRACTION = -0.01
+const TRAVEL_END_FRACTION = 1
+/**
+ * Fraction of the run spent clearing the portal. The tunnel card occludes the
+ * emerging half of the train outright; this ramp only covers the tail, which
+ * would otherwise wink into existence beyond the arch.
+ */
+const EMERGENCE_FRACTION = 0.3
+
 // Pixel-measured mouth of the tall forward funnel in the supplied side-view
 // art. The locomotive faces screen-right, so steam trails toward screen-left.
 const CHIMNEY_U = 0.804
 const CHIMNEY_V = 0.147
-const TRAIN_WHEEL_SOURCE_Y = 0.8
+// Measured off the rendered frame against the painted deck, not off the card
+// art: at 0.8 the wheels floated roughly a sleeper's height above the rail.
+export const TRAIN_WHEEL_SOURCE_Y = 0.727
+// Rear edge of the rearmost driving wheel. The gear overlays are separate
+// meshes that the card's wipe cannot clip, so they must stay hidden until the
+// whole mechanism has left the tunnel — gating on the locomotive's front left
+// disembodied wheels turning against the rock face.
+const LOCOMOTIVE_SOURCE_U = 0.478
 const STEAM_PUFF_COUNT = 3
 const STEAM_CYCLE_SECONDS = 3.1
 
@@ -230,7 +253,18 @@ export interface CinematicTrainOptions {
    * Camera-space vertical placement. A callback lets the train follow an
    * authored rail line as a background plate reframes across desktop aspects.
    */
-  readonly screenY?: number | ((camera: Camera) => number)
+  /**
+   * Camera-local y for the wheel line. The callback receives the card's
+   * current lateral offset because the painted railbed climbs — a height that
+   * ignores where the train is along the track cannot sit on it.
+   */
+  readonly screenY?: number | ((camera: Camera, lateral: number) => number)
+  /**
+   * Camera-local x of the tunnel mouth the train emerges from. Supplying it
+   * turns the run into a real emergence: the card starts wholly inside the
+   * mountain and is wiped by the portal edge as it pulls out.
+   */
+  readonly tunnelLateral?: (camera: Camera) => number
   /** Duration of one left-to-right crossing. */
   readonly loopSeconds?: number
 }
@@ -305,6 +339,11 @@ function positive(value: number | undefined, fallback: number): number {
 function unitLoop(value: number): number {
   const wrapped = value - Math.floor(value)
   return Number.isFinite(wrapped) ? wrapped : 0
+}
+
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return value < 0 ? 0 : value > 1 ? 1 : value
 }
 
 function smoothstep01(value: number): number {
@@ -503,6 +542,22 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
     fog: true,
     toneMapped: false,
   })
+  // A horizontal wipe at the portal edge. This is what makes the locomotive
+  // come *out of* the mountain rather than fade up in front of it.
+  const revealUniform = { value: 0 }
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uRevealU = revealUniform
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', 'uniform float uRevealU;\nvoid main() {')
+      .replace(
+        '#include <alphatest_fragment>',
+        `float pcReveal = smoothstep(uRevealU, uRevealU + 0.008, vMapUv.x);
+         if (pcReveal <= 0.0) discard;
+         diffuseColor.a *= pcReveal;
+         #include <alphatest_fragment>`,
+      )
+  }
+
   const image = new Mesh(geometry, material)
   image.name = 'Purple excursion train image'
   image.visible = false
@@ -734,10 +789,32 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
     const motionProgress = options.reducedMotion
       ? REDUCED_MOTION_PROGRESS
       : unitLoop(Math.max(0, finite(elapsedSeconds, 0)) / loopSeconds + INITIAL_PROGRESS)
-    const lateral = (motionProgress * 2 - 1) * halfSpan
+    const tunnelLateral = options.tunnelLateral?.(camera)
+    const hasTunnel = typeof tunnelLateral === 'number' && Number.isFinite(tunnelLateral)
+    // Nose at the mouth means the whole card starts inside the mountain.
+    const startLateral = hasTunnel
+      ? tunnelLateral - width * 0.5
+      : TRAVEL_START_FRACTION * halfSpan
+    const endLateral = TRAVEL_END_FRACTION * halfSpan
+    const lateral = startLateral + motionProgress * (endLateral - startLateral)
+    // Local u on the card at the portal edge. Everything left of it is still
+    // in the tunnel and must not be drawn — a uniform opacity ramp would make
+    // the buried half translucent over the hillside instead of hidden.
+    const revealU = hasTunnel
+      ? clampUnit(0.5 + (tunnelLateral - lateral) / Math.max(1e-4, width))
+      : 0
+    revealUniform.value = revealU
+    // Without a tunnel to hide behind, fall back to fading at the run's ends.
+    const emergence =
+      options.reducedMotion || hasTunnel
+        ? smoothstep01((1 - motionProgress) / 0.08)
+        : smoothstep01(motionProgress / EMERGENCE_FRACTION) *
+          smoothstep01((1 - motionProgress) / 0.08)
     const time = Math.max(0, finite(elapsedSeconds, 0))
     const requestedScreenY =
-      typeof screenYSource === 'function' ? screenYSource(camera) : screenYSource
+      typeof screenYSource === 'function'
+        ? screenYSource(camera, lateral)
+        : screenYSource
     const screenY = finite(requestedScreenY, DEFAULT_SCREEN_Y)
     // The wheel contact is deliberately rigid: even a charming suspension
     // bob makes a distant 2.5D locomotive look like it is floating above the
@@ -755,15 +832,29 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
       ? 0
       : celebrationEnvelope(time - celebrationStartedAt)
     const visualReady = image.visible && material.map !== null
-    const wheelRevolutionSeconds = wheelRevolutionSecondsForCrossing(halfSpan, loopSeconds, width)
+    material.opacity = emergence
+    // Wheel speed is derived from how far the card actually travels, so
+    // shortening the run to the painted railway does not leave the drivers
+    // spinning at the old full-span rate.
+    const travelHalfSpan =
+      (halfSpan * (TRAVEL_END_FRACTION - TRAVEL_START_FRACTION)) / 2
+    const wheelRevolutionSeconds = wheelRevolutionSecondsForCrossing(
+      travelHalfSpan,
+      loopSeconds,
+      width,
+    )
     const mechanicalPose = sampleCinematicTrainMechanicalPose(
       options.reducedMotion ? 0 : time,
       { trainWidth: width, wheelRevolutionSeconds, celebration },
     )
 
-    runningGear.visible = visualReady
-    headlamp.visible = visualReady
-    if (visualReady) {
+    // The gear, lamp, and steam are separate meshes, so the card's wipe does
+    // not clip them. Gate them on the locomotive itself being clear of the
+    // portal — otherwise disembodied drive wheels turn in front of the rock.
+    const locomotiveClear = revealU < LOCOMOTIVE_SOURCE_U
+    runningGear.visible = visualReady && locomotiveClear
+    headlamp.visible = visualReady && locomotiveClear
+    if (visualReady && locomotiveClear) {
       for (const wheel of driverWheels) wheel.rig.rotation.z = mechanicalPose.driveWheelAngle
 
       couplingRod.mesh.position.set(
@@ -791,14 +882,14 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
       )
 
       headlampBloom.scale.setScalar(mechanicalPose.headlamp.scale)
-      headlampOpacityUniform.value = mechanicalPose.headlamp.opacity
+      headlampOpacityUniform.value = mechanicalPose.headlamp.opacity * emergence
     } else {
       headlampOpacityUniform.value = 0
     }
 
     // Steam is a motion cue, not a separate landmark. It is absent until the
     // train image is ready, then fully suppressed under reduced motion.
-    steam.visible = !options.reducedMotion && visualReady
+    steam.visible = !options.reducedMotion && visualReady && locomotiveClear
     if (steam.visible) {
       for (let index = 0; index < steamPuffs.length; index++) {
         const puff = steamPuffs[index]!
@@ -807,7 +898,8 @@ export function createCinematicTrain(options: CinematicTrainOptions = {}): Cinem
         puff.mesh.position.y = pose.y
         puff.mesh.scale.setScalar(pose.scale)
         puff.mesh.rotation.z = pose.rotation
-        puff.opacityUniform.value = pose.opacity * (1 + celebration * 0.55)
+        puff.opacityUniform.value =
+          pose.opacity * (1 + celebration * 0.55) * emergence
       }
     }
   }

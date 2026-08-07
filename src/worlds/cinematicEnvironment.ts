@@ -19,10 +19,81 @@ import {
   Vector3,
 } from 'three'
 import type { Texture } from 'three'
+import {
+  applyLivingPlateMotion,
+  configurePlateTexture,
+  type LivingPlate,
+} from './livingPlate'
 
-export const BLUE_RIDGE_GARDEN_ASSET_URL = '/assets/blue-ridge-garden-railway-v2.webp'
-/** The lower (near-camera) railhead in the authored 16:9 garden plate. */
-export const GARDEN_RAIL_HEAD_SOURCE_Y = 0.545
+export const BLUE_RIDGE_GARDEN_ASSET_URL = '/assets/storybook-garden-railway-v2.jpg'
+/** The railhead in the authored 16:9 garden plate's elevated bridge. */
+export const GARDEN_RAIL_HEAD_SOURCE_Y = 0.285
+
+/**
+ * The painted railbed is a climbing grade, not a level line: it emerges from a
+ * cliff shoulder on the left and rises across the trestle and stone viaduct
+ * toward the right edge. Running the train at one fixed height made it float
+ * above the deck at one end and sink through it at the other.
+ *
+ * Points are pixel-measured [u, sourceY] pairs along the deck of
+ * `storybook-garden-railway-v2.jpg`, left to right.
+ */
+export const GARDEN_RAILBED: readonly (readonly [number, number])[] = [
+  [0.6, 0.301],
+  [0.67, 0.273],
+  [0.76, 0.259],
+  [0.85, 0.241],
+  [0.98, 0.216],
+]
+
+/** Where the painted deck runs into the rock. The train emerges here. */
+export const GARDEN_TUNNEL_U = GARDEN_RAILBED[0]![0]
+
+/**
+ * Height of the painted railbed at a given plate u, clamped to the measured
+ * span at both ends. Exported so the slope contract is testable without WebGL.
+ */
+export function gardenRailSourceYAtU(u: number): number {
+  if (!Number.isFinite(u)) return GARDEN_RAIL_HEAD_SOURCE_Y
+  const first = GARDEN_RAILBED[0]!
+  const last = GARDEN_RAILBED[GARDEN_RAILBED.length - 1]!
+  if (u <= first[0]) return first[1]
+  if (u >= last[0]) return last[1]
+  for (let index = 0; index < GARDEN_RAILBED.length - 1; index++) {
+    const start = GARDEN_RAILBED[index]!
+    const end = GARDEN_RAILBED[index + 1]!
+    if (u <= end[0]) {
+      const span = end[0] - start[0]
+      const progress = span <= 0 ? 0 : (u - start[0]) / span
+      return start[1] + (end[1] - start[1]) * progress
+    }
+  }
+  return last[1]
+}
+
+/**
+ * Converts a camera-space x at the plate's own depth into a plate u. Cards at
+ * other depths must scale their x by (their distance / plate distance) first.
+ */
+export function cinematicGardenPlateU(
+  verticalFovDegrees: number,
+  viewportAspect: number,
+  plateSpaceX: number,
+): number {
+  const plate = fitCinematicPlate(verticalFovDegrees, viewportAspect)
+  if (plate.width <= 0) return 0.5
+  return 0.5 + plateSpaceX / plate.width
+}
+
+/** Camera-local y of the painted railbed at a plate u, at the plate's depth. */
+export function cinematicGardenRailYAtU(
+  verticalFovDegrees: number,
+  viewportAspect: number,
+  plateU: number,
+): number {
+  const plate = fitCinematicPlate(verticalFovDegrees, viewportAspect)
+  return (0.5 - gardenRailSourceYAtU(plateU)) * plate.height
+}
 const ASSET_ASPECT = 1672 / 941
 /** Camera-space depth of the composed garden plate. */
 export const CINEMATIC_ENVIRONMENT_DISTANCE = 30
@@ -103,6 +174,9 @@ export function createCinematicEnvironment(): CinematicEnvironment {
     depthWrite: false,
     toneMapped: false,
   })
+  // The painted waterfalls, lake, and clouds are still pixels; this is what
+  // makes them move.
+  const livingPlate: LivingPlate = applyLivingPlateMotion(material)
   const plate = new Mesh(new PlaneGeometry(1, 1), material)
   plate.name = 'Hyper-realistic Blue Ridge garden railway plate'
   // A textureless opaque card would render as a black full-screen rectangle.
@@ -125,6 +199,7 @@ export function createCinematicEnvironment(): CinematicEnvironment {
   function installTexture(texture: Texture): void {
     const previousTexture = ownedTexture
     texture.colorSpace = SRGBColorSpace
+    configurePlateTexture(texture)
     // The source plate is already lit and graded. A material-only render keeps
     // its garden colours stable beneath the game's key/fill/rim light rig.
     texture.generateMipmaps = true
@@ -163,6 +238,7 @@ export function createCinematicEnvironment(): CinematicEnvironment {
     reducedMotion = false,
   ): void {
     if (disposed) return
+    livingPlate.setTime(Math.max(0, elapsedSeconds), reducedMotion ? 0 : 1)
     camera.getWorldDirection(cameraDirection)
     root.position
       .copy(camera.position)

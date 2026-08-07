@@ -8,7 +8,6 @@
  */
 import {
   BufferAttribute,
-  CanvasTexture,
   DoubleSide,
   DynamicDrawUsage,
   Group,
@@ -22,38 +21,117 @@ import {
   TextureLoader,
   Vector3,
 } from 'three'
+import { createContactShadow, type ContactShadow } from '../contactShadow'
+import { applyHeroGrade } from './heroGrade'
 import type { Quadruped } from './quadruped'
 
-const DEFAULT_HERO_URL = '/assets/purple-cougar-hero.webp'
+const DEFAULT_HERO_URL = '/assets/purple-cougar-cub-hero-v1.webp'
 
-// The image has intentional transparent padding. These dimensions put the
-// visible paws on y=0 while keeping the ear tips close to the authored rig.
-const PLANE_HEIGHT = 1.48
-const PLANE_WIDTH = PLANE_HEIGHT * (1402 / 1122)
-const PLANE_CENTER_Y = 0.62
+// EVERY constant below is pixel-measured against that exact plate: a 676x972
+// canvas whose matted cub occupies x 31..645, y 44..928. Changing the hero
+// image without re-measuring them animates the wrong fur — ear flicks land on
+// a shoulder and the tether leaves mid-flank. Re-cut with
+// tools/subject-cutout.swift and re-read the anchors before touching the URL.
+const HERO_PIXEL_WIDTH = 676
+const HERO_PIXEL_HEIGHT = 972
+const HERO_SUBJECT_LEFT = 31
+const HERO_SUBJECT_TOP = 44
+const HERO_SUBJECT_WIDTH = 614
+const HERO_SUBJECT_HEIGHT = 884
 
-// Pixel-measured center of the rear ankle cuff in the generated hero image.
-const CUFF_LOCAL_X = (0.722 - 0.5) * PLANE_WIDTH
-const CUFF_LOCAL_Y = (0.5 - 0.761) * PLANE_HEIGHT
-const HERO_PIXEL_WIDTH = 1402
-const HERO_PIXEL_HEIGHT = 1122
+// The cub faces the camera, so her plate is tall and narrow where the previous
+// side-on adult was wide. Height is chosen so the painted body stands ~1.16
+// world units — shorter and rounder than the adult, which is the whole point.
+const PLANE_HEIGHT = 1.28
+const PLANE_WIDTH = PLANE_HEIGHT * (HERO_PIXEL_WIDTH / HERO_PIXEL_HEIGHT)
+// Puts the painted front paws on y=0 so she stands on the path, not above it.
+const PLANE_CENTER_Y =
+  ((HERO_SUBJECT_TOP + HERO_SUBJECT_HEIGHT) / HERO_PIXEL_HEIGHT - 0.5) *
+  PLANE_HEIGHT
+
+// Darkness of the hero's grounding blob while all four paws are down.
+const HERO_SHADOW_STRENGTH = 0.9
+
+// The plate paints a short cord stub leaving the hind ankle. Anchoring the
+// real tether at the top of that stub is what makes the painted and simulated
+// halves read as one cord instead of two.
+const CUFF_SOURCE_U = 0.658
+const CUFF_SOURCE_Y = 0.738
+const CUFF_LOCAL_X = (CUFF_SOURCE_U - 0.5) * PLANE_WIDTH
+const CUFF_LOCAL_Y = (0.5 - CUFF_SOURCE_Y) * PLANE_HEIGHT
 // Pixel-measured nontransparent trim of the authored WebP. This cheap first
-// pass rejects the large transparent margin before the generous hero hit test
-// can consume a ball or world-discovery tap.
-const HERO_ALPHA_MIN_U = 71 / HERO_PIXEL_WIDTH
-const HERO_ALPHA_MAX_U = (71 + 1309) / HERO_PIXEL_WIDTH
-const HERO_ALPHA_MIN_SOURCE_Y = 91 / HERO_PIXEL_HEIGHT
-const HERO_ALPHA_MAX_SOURCE_Y = (91 + 940) / HERO_PIXEL_HEIGHT
+// pass rejects the transparent margin before the generous hero hit test can
+// consume a ball or world-discovery tap.
+const HERO_ALPHA_MIN_U = HERO_SUBJECT_LEFT / HERO_PIXEL_WIDTH
+const HERO_ALPHA_MAX_U =
+  (HERO_SUBJECT_LEFT + HERO_SUBJECT_WIDTH) / HERO_PIXEL_WIDTH
+const HERO_ALPHA_MIN_SOURCE_Y = HERO_SUBJECT_TOP / HERO_PIXEL_HEIGHT
+const HERO_ALPHA_MAX_SOURCE_Y =
+  (HERO_SUBJECT_TOP + HERO_SUBJECT_HEIGHT) / HERO_PIXEL_HEIGHT
+// The cub's tail leaves her right haunch and curls up over her back. Points
+// are (u, v) with v measured from the image bottom, like a Three UV.
 const TAIL_CENTERLINE = [
-  [0.745, 0.603],
-  [0.785, 0.483],
-  [0.856, 0.407],
-  [0.927, 0.394],
-  [0.963, 0.456],
-  [0.942, 0.519],
+  [0.775, 0.655],
+  [0.800, 0.710],
+  [0.845, 0.757],
+  [0.898, 0.786],
+  [0.937, 0.762],
+  [0.928, 0.722],
 ] as const
+// Half-width of the bendable tail band, as a fraction of plate width so a
+// future re-plate at a different resolution keeps the same feathering.
+const TAIL_BAND_INNER = HERO_PIXEL_WIDTH * 0.02
+const TAIL_BAND_OUTER = HERO_PIXEL_WIDTH * 0.044
 
 export type HeroReaction = 'happy' | 'surprised' | 'roar'
+
+/** One readable piece of idle charm, layered over the ambient breathing. */
+export interface HeroIdleBeat {
+  /** Curious head cock, -1 (her left) to 1 (her right). */
+  readonly headTilt: number
+  /** Snappy tail swish, -1 to 1. */
+  readonly tailFlick: number
+  /** Both ears up at once, 0 to 1. */
+  readonly earPerk: number
+  /** Delighted little haunch wiggle, -1 to 1. */
+  readonly wiggle: number
+}
+
+const IDLE_BEAT_PERIOD = 5.5
+const IDLE_BEAT_DURATION = 1.5
+const NO_IDLE_BEAT: HeroIdleBeat = { headTilt: 0, tailFlick: 0, earPerk: 0, wiggle: 0 }
+
+/**
+ * Ambient breathing alone keeps a cutout from looking dead, but it never makes
+ * her look *cute* — that comes from occasional, readable beats a child can
+ * actually notice: a head cock, a tail swish, both ears popping up, a wiggle.
+ *
+ * Deterministic in elapsed time (no RNG) so the whole hero presentation stays
+ * reproducible frame-for-frame, and pure so the cadence is testable.
+ */
+export function sampleHeroIdleBeat(elapsedSeconds: number): HeroIdleBeat {
+  const time = Math.max(0, Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0)
+  const cycle = Math.floor(time / IDLE_BEAT_PERIOD)
+  const phase = (time % IDLE_BEAT_PERIOD) / IDLE_BEAT_DURATION
+  // Each beat occupies only the first IDLE_BEAT_DURATION of its cycle; the
+  // rest is calm, which is what makes the next one register.
+  if (phase >= 1) return NO_IDLE_BEAT
+
+  // A half-sine envelope means every beat eases in and out of the ambient
+  // motion instead of snapping on at the cycle boundary.
+  const envelope = Math.sin(phase * Math.PI)
+  switch (cycle % 4) {
+    case 0:
+      // Alternate which way she cocks her head so it never looks like a tic.
+      return { ...NO_IDLE_BEAT, headTilt: envelope * (cycle % 8 === 0 ? 1 : -1) }
+    case 1:
+      return { ...NO_IDLE_BEAT, tailFlick: Math.sin(phase * Math.PI * 3) * envelope }
+    case 2:
+      return { ...NO_IDLE_BEAT, earPerk: envelope }
+    default:
+      return { ...NO_IDLE_BEAT, wiggle: Math.sin(phase * Math.PI * 4) * envelope }
+  }
+}
 
 export interface HeroDeformationPose {
   /** Signed inhale/exhale amount in the range -1...1. */
@@ -239,7 +317,8 @@ function tailMask(u: number, v: number): number {
     }
   }
 
-  const contourWeight = 1 - smoothstep(28, 62, closestDistance)
+  const contourWeight =
+    1 - smoothstep(TAIL_BAND_INNER, TAIL_BAND_OUTER, closestDistance)
   const rootWeight = smoothstep(0.035, 0.2, closestProgress)
   return contourWeight * rootWeight
 }
@@ -286,13 +365,16 @@ export function deformHeroPoint(
 
   // The ribcage expands above the planted legs instead of scaling the whole
   // photograph. That small distinction is what prevents "breathing" paws.
+  // v=0.36 is the cub's belly line. The mask must start above it: her hind
+  // cuff sits at v=0.262, and any breathing that reaches it drags the tether
+  // anchor off her ankle.
   const bodyMask =
-    smoothstep(0.2, 0.34, u) *
-    (1 - smoothstep(0.73, 0.82, u)) *
-    smoothstep(0.29, 0.43, v) *
-    (1 - smoothstep(0.72, 0.82, v))
-  const bodyHeight = smoothstep(0.31, 0.67, v)
-  const bodyPivotX = (0.52 - 0.5) * PLANE_WIDTH
+    smoothstep(0.16, 0.28, u) *
+    (1 - smoothstep(0.82, 0.92, u)) *
+    smoothstep(0.36, 0.48, v) *
+    (1 - smoothstep(0.58, 0.72, v))
+  const bodyHeight = smoothstep(0.36, 0.60, v)
+  const bodyPivotX = (0.5 - 0.5) * PLANE_WIDTH
   target.x +=
     (baseX - bodyPivotX) * pose.breath * bodyMask * bodyHeight * 0.006
   target.y += pose.breath * bodyMask * bodyHeight * 0.0085
@@ -303,81 +385,70 @@ export function deformHeroPoint(
   const torsoSway = finitePoseValue(pose.torsoSway)
   target.x += torsoSway * bodyMask * 0.0065
 
-  // The left/front shoulder is the most readable place for a small inhale,
-  // perk, or delighted bounce. Keeping it above the elbow preserves the
-  // tether-side cuff and the strong standing silhouette from the reference.
-  const shoulderMask = ellipseMask(u, v, 0.365, 0.59, 0.145, 0.19)
+  // The chest/shoulder shelf under her chin is the most readable place for a
+  // small inhale, perk, or delighted bounce. Keeping it above the elbows
+  // preserves the planted front paws and the chunky cub silhouette.
+  const shoulderMask = ellipseMask(u, v, 0.45, 0.47, 0.17, 0.11)
   target.y += finitePoseValue(pose.shoulderLift) * shoulderMask * 0.012
 
   // Ears move first so the head transform naturally carries them along.
-  const leftEarMask = ellipseMask(u, v, 0.092, 0.842, 0.068, 0.125)
-  const rightEarMask = ellipseMask(u, v, 0.267, 0.854, 0.075, 0.14)
+  const leftEarMask = ellipseMask(u, v, 0.160, 0.845, 0.098, 0.105)
+  const rightEarMask = ellipseMask(u, v, 0.555, 0.850, 0.088, 0.100)
   rotateMasked(
     target,
-    0.114,
-    0.795,
+    0.200,
+    0.740,
     pose.leftEarFlick,
     leftEarMask,
   )
   rotateMasked(
     target,
-    0.253,
-    0.8,
+    0.510,
+    0.750,
     pose.rightEarFlick,
     rightEarMask,
   )
 
+  // Her head is centred and nearly as wide as her body, so the old
+  // left-quadrant mask would have rolled half her torso with it.
   const headMask =
-    (1 - smoothstep(0.3, 0.42, u)) * smoothstep(0.52, 0.65, v)
-  rotateMasked(target, 0.285, 0.64, pose.headRoll, headMask)
+    (1 - smoothstep(0.62, 0.76, u)) * smoothstep(0.48, 0.62, v)
+  rotateMasked(target, 0.370, 0.500, pose.headRoll, headMask)
   target.x += pose.headShiftX * headMask
   target.y += pose.headLift * headMask
 
   // Only the exposed tail arc bends. The haunch and cuffed rear leg remain
   // untouched even though they share the same broad image quadrant.
   const exposedTailMask = tailMask(u, v)
-  rotateMasked(target, 0.745, 0.603, pose.tailSwing, exposedTailMask)
+  rotateMasked(target, 0.775, 0.655, pose.tailSwing, exposedTailMask)
   // A second, much smaller bend lands in the curled half of the tail. This
   // avoids a rigid windshield-wiper wag while leaving the root attached to
   // the haunch and the image's recognizable curl intact.
-  const tailTipMask = ellipseMask(u, v, 0.954, 0.46, 0.085, 0.13)
+  const tailTipMask = ellipseMask(u, v, 0.912, 0.775, 0.070, 0.085)
   rotateMasked(
     target,
-    0.89,
-    0.48,
+    0.845,
+    0.757,
     finitePoseValue(pose.tailCurl),
     exposedTailMask * tailTipMask,
   )
 }
 
-function createContactShadow(): Mesh {
-  const canvas = document.createElement('canvas')
-  canvas.width = 128
-  canvas.height = 128
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('Could not create Purple Cougar contact shadow')
-
-  const gradient = context.createRadialGradient(64, 64, 5, 64, 64, 62)
-  gradient.addColorStop(0, 'rgba(35, 23, 48, 0.34)')
-  gradient.addColorStop(0.46, 'rgba(35, 23, 48, 0.19)')
-  gradient.addColorStop(1, 'rgba(35, 23, 48, 0)')
-  context.fillStyle = gradient
-  context.fillRect(0, 0, 128, 128)
-
-  const texture = new CanvasTexture(canvas)
-  const shadow = new Mesh(
-    new PlaneGeometry(1.48, 0.5),
-    new MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      depthWrite: false,
-      toneMapped: false,
-    }),
-  )
-  shadow.name = 'purpleCougarHeroShadow'
-  shadow.position.set(0.02, 0.008, -0.03)
-  shadow.rotation.x = -Math.PI / 2
-  shadow.renderOrder = 0
+/**
+ * A four-legged animal standing on stone casts one connected pool, not a neat
+ * oval centred on her belly. The cub faces the camera, so her footprint is
+ * nearly square where the side-on adult's ran 2.6x deep; it still leans deeper
+ * than wide to survive the shallow follow-camera angle, which foreshortens a
+ * flat ground plane hard.
+ */
+function createHeroContactShadow(): ContactShadow {
+  const shadow = createContactShadow({
+    length: 1.55,
+    width: 1.05,
+    strength: HERO_SHADOW_STRENGTH,
+  })
+  shadow.mesh.name = 'purpleCougarHeroShadow'
+  shadow.setGroundPosition(0.02, -0.03)
   return shadow
 }
 
@@ -410,6 +481,9 @@ export async function loadHeroBillboard(
     side: DoubleSide,
     toneMapped: false,
   })
+  // Sit her inside the plate's golden hour instead of on top of it.
+  applyHeroGrade(material, texture)
+
   const geometry = new PlaneGeometry(PLANE_WIDTH, PLANE_HEIGHT, 64, 52)
   const plane = new Mesh(
     geometry,
@@ -428,8 +502,8 @@ export async function loadHeroBillboard(
   cuffAnchor.position.set(CUFF_LOCAL_X, CUFF_LOCAL_Y, 0.006)
   plane.add(cuffAnchor)
 
-  const shadow = createContactShadow()
-  root.add(shadow)
+  const shadow = createHeroContactShadow()
+  root.add(shadow.mesh)
 
   // Hide only after the replacement texture loaded successfully. A network or
   // decode failure therefore leaves the authored 3D character intact.
@@ -495,46 +569,58 @@ export async function loadHeroBillboard(
     const combinedHeadRoll =
       (headPose?.rotation.z ?? 0) + (neckPose?.rotation.z ?? 0)
 
+    // Ambient rhythm keeps her alive; the beat is what makes her cute.
+    const idle = sampleHeroIdleBeat(elapsed)
+
     deformationPose.breath = breath
     deformationPose.torsoSway = clamp(
-      bodySway * 0.36 + currentRigRoot.rotation.z * 4.8,
-      -0.55,
-      0.55,
+      bodySway * 0.36 + currentRigRoot.rotation.z * 4.8 + idle.wiggle * 0.34,
+      -0.75,
+      0.75,
     )
     deformationPose.shoulderLift = clamp(
-      breath * 0.38 + shoulderPulse * 0.12,
-      -0.55,
-      0.55,
+      breath * 0.38 + shoulderPulse * 0.12 + Math.abs(idle.wiggle) * 0.22,
+      -0.75,
+      0.75,
     )
     deformationPose.headShiftX = clamp(
-      combinedHeadYaw * 0.03 + Math.sin(elapsed * 0.47 + 0.3) * 0.0028,
-      -0.0105,
-      0.0105,
+      combinedHeadYaw * 0.03 +
+        Math.sin(elapsed * 0.47 + 0.3) * 0.0028 +
+        idle.headTilt * 0.004,
+      -0.016,
+      0.016,
     )
     deformationPose.headLift = clamp(
-      -combinedHeadPitch * 0.018 + curiousNod * 0.0025,
+      -combinedHeadPitch * 0.018 + curiousNod * 0.0025 + idle.earPerk * 0.0035,
       -0.006,
-      0.008,
+      0.012,
     )
+    // A head cock is worth roughly 9 degrees. The old ±1.1-degree ceiling was
+    // invisible at play distance, which is why she read as a posed photograph.
     deformationPose.headRoll = clamp(
-      combinedHeadRoll * 0.32 + Math.sin(elapsed * 0.83 + 0.9) * 0.0045,
-      -0.02,
-      0.02,
+      combinedHeadRoll * 0.32 +
+        Math.sin(elapsed * 0.83 + 0.9) * 0.0045 +
+        idle.headTilt * 0.155,
+      -0.19,
+      0.19,
     )
     deformationPose.tailSwing = clamp(
       (tailPose?.rotation.y ?? Math.sin(elapsed * 1.7) * 0.08) * 0.14 +
-        tailCounterWave * 0.018,
-      -0.05,
-      0.05,
+        tailCounterWave * 0.018 +
+        idle.tailFlick * 0.2,
+      -0.28,
+      0.28,
     )
-    deformationPose.tailCurl = tailCounterWave * 0.028
+    deformationPose.tailCurl = tailCounterWave * 0.028 - idle.tailFlick * 0.05
 
     // Narrow deterministic pulses read as independent ear flicks rather than
-    // both ears mechanically rocking forever.
+    // both ears mechanically rocking forever. The perk beat overrides that and
+    // pops both ears up together.
     const leftFlick = Math.max(0, Math.sin(elapsed * 1.19 + 0.4) - 0.94) / 0.06
     const rightFlick = Math.max(0, Math.sin(elapsed * 0.91 + 2.1) - 0.955) / 0.045
-    deformationPose.leftEarFlick = leftFlick * leftFlick * 0.045
-    deformationPose.rightEarFlick = -rightFlick * rightFlick * 0.038
+    deformationPose.leftEarFlick = leftFlick * leftFlick * 0.045 + idle.earPerk * 0.055
+    deformationPose.rightEarFlick =
+      -rightFlick * rightFlick * 0.038 - idle.earPerk * 0.055
 
     let lift = 0
     let roll = Math.sin(elapsed * 0.9) * 0.0015 + currentRigRoot.rotation.z * 0.6
@@ -641,7 +727,9 @@ export async function loadHeroBillboard(
     plane.position.y = PLANE_CENTER_Y + lift
     plane.rotation.z = roll
     plane.scale.set(1, 1, 1)
-    shadow.scale.set(1 - lift * 0.55, 1, 1)
+    // A hop lifts her off the ground: the pool tightens and lightens with her.
+    shadow.mesh.scale.set(1 - lift * 0.42, 1 - lift * 0.42, 1)
+    shadow.material.opacity = HERO_SHADOW_STRENGTH * Math.max(0, 1 - lift * 1.6)
 
     for (let index = 0; index < positionAttribute.count; index += 1) {
       const offset = index * 3
@@ -689,19 +777,7 @@ export async function loadHeroBillboard(
       geometry.dispose()
       material.dispose()
       texture.dispose()
-      shadow.geometry.dispose()
-      const shadowMaterial = shadow.material
-      if (Array.isArray(shadowMaterial)) {
-        for (const entry of shadowMaterial) {
-          if (entry instanceof MeshBasicMaterial) entry.map?.dispose()
-          entry.dispose()
-        }
-      } else {
-        if (shadowMaterial instanceof MeshBasicMaterial) {
-          shadowMaterial.map?.dispose()
-        }
-        shadowMaterial.dispose()
-      }
+      shadow.dispose()
       root.removeFromParent()
     },
   }

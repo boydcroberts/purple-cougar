@@ -17,6 +17,7 @@ import {
 } from '../src/worlds/cinematicEnvironment'
 import {
   CINEMATIC_TRAIN_DISTANCE,
+  TRAIN_WHEEL_SOURCE_Y,
   PURPLE_EXCURSION_TRAIN_ASSET_URL,
   cinematicTrainWheelContactY,
   createCinematicTrain,
@@ -128,7 +129,10 @@ describe('cinematic purple excursion train', () => {
 
     train.update(camera, 0)
     expect(train.root.position.distanceTo(expectedCameraLockedPosition(camera, 19))).toBeLessThan(1e-8)
-    expect(train.vehicle.position.x).toBeLessThan(0)
+    // The run is confined to the half of the plate that actually paints a
+    // railway, so the opening frame sits right of centre on the viaduct
+    // rather than out over the lake.
+    expect(train.vehicle.position.x).toBeGreaterThan(0)
     expect(train.image.visible).toBe(false)
 
     const firstPosition = train.vehicle.position.clone()
@@ -173,7 +177,7 @@ describe('cinematic purple excursion train', () => {
         .project(camera)
       const trainHeight = train.image.geometry.parameters.height
       const wheel = train.image
-        .localToWorld(new Vector3(0, (0.5 - 0.8) * trainHeight, 0))
+        .localToWorld(new Vector3(0, (0.5 - TRAIN_WHEEL_SOURCE_Y) * trainHeight, 0))
         .project(camera)
 
       expect(wheel.y).toBeCloseTo(rail.y, 2)

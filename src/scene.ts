@@ -245,8 +245,9 @@ export function createStage(host: HTMLElement): Stage {
     const h = host.clientHeight
     renderer.setSize(w, h, false)
     camera.aspect = w / Math.max(1, h)
-    // Portrait on an iPad crops the sides badly at a fixed FOV, so widen it.
-    camera.fov = camera.aspect < 1 ? 58 : 42
+    // Square and portrait panes crop the storybook foreground badly at the
+    // desktop FOV, so give them the same wider playfield as phone/tablet.
+    camera.fov = camera.aspect < 1.2 ? 58 : 42
     camera.updateProjectionMatrix()
     bokehPass.enabled = !flatHeroMode && camera.aspect >= 1.2
 

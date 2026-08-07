@@ -2,24 +2,24 @@
  * Sparse camera-locked garden life for the authored cinematic plate.
  *
  * This layer intentionally lives only at the outer garden edges: the cougar,
- * tethered ball, and railway remain the readable play sentence. It uses small
- * bounded instanced layers instead of a texture collage: warm pollen, lake
- * glints, near grass, blossoms, and grounded stones.
+ * tethered ball, and railway remain the readable play sentence. It is warm
+ * pollen and distant lake glints only.
+ *
+ * It used to carry a near "botanical frame" too — flat-shaded grass blades,
+ * circle-petal blossoms and dodecahedron stones locked 12.5 units from the
+ * camera. Against a procedural world that read as depth; against the authored
+ * photoreal plate the same untextured primitives read as green bars and white
+ * specks pasted over a photograph, so they were cut. Soft out-of-focus motes
+ * survive over a photographic plate; hard-edged geometry does not.
  */
 import {
-  BufferGeometry,
   CircleGeometry,
   Color,
-  DodecahedronGeometry,
-  DoubleSide,
   DynamicDrawUsage,
-  Float32BufferAttribute,
   Group,
   InstancedMesh,
   Matrix4,
-  Mesh,
   MeshBasicMaterial,
-  MeshStandardMaterial,
   PlaneGeometry,
   Quaternion,
   Vector3,
@@ -30,31 +30,10 @@ const DEFAULT_POLLEN_COUNT = 10
 const DEFAULT_GLINT_COUNT = 4
 const MAX_POLLEN_COUNT = 18
 const MAX_GLINT_COUNT = 8
+const BURST_SECONDS = 0.78
 const DEFAULT_POLLEN_DISTANCE = 16.5
 const DEFAULT_GLINT_DISTANCE = 26
-const DEFAULT_FOREGROUND_DISTANCE = 12.5
-const FOREGROUND_BLADE_COUNT = 28
-const FOREGROUND_FLOWER_COUNT = 8
-const PETALS_PER_FLOWER = 5
-const BURST_SECONDS = 0.78
 
-const FOREGROUND_FLOWERS: ReadonlyArray<readonly [number, number, number]> = [
-  [-0.44, -0.29, 0.95],
-  [-0.50, -0.24, 0.72],
-  [-0.42, -0.20, 0.82],
-  [-0.53, -0.34, 1.08],
-  [0.44, -0.27, 0.86],
-  [0.51, -0.21, 1.04],
-  [0.43, -0.34, 0.74],
-  [0.54, -0.29, 0.91],
-]
-
-const FOREGROUND_ROCKS: ReadonlyArray<readonly [number, number, number]> = [
-  [-1, 0.43, 0.24],
-  [-1, 0.51, 0.16],
-  [1, 0.43, 0.2],
-  [1, 0.52, 0.27],
-]
 
 export interface GardenLifeViewport {
   /** Camera-space viewport width at the layer's depth. */
@@ -92,8 +71,6 @@ export interface CinematicGardenLifeOptions {
   readonly pollenDistance?: number
   /** Camera-space lake-glint depth. It should remain behind the train. */
   readonly glintDistance?: number
-  /** Camera-space depth for the near botanical frame. */
-  readonly foregroundDistance?: number
 }
 
 export interface CinematicGardenLife {
@@ -165,21 +142,6 @@ function edgeX(index: number, width: number): number {
   return side * width * (0.35 + ((lane * 0.071) % 0.11))
 }
 
-function createGrassBladeGeometry(): BufferGeometry {
-  // A slightly asymmetric blade silhouette is more legible than a rectangle
-  // at the edge of the frame, while remaining a single tiny draw primitive.
-  const geometry = new BufferGeometry()
-  geometry.setAttribute(
-    'position',
-    new Float32BufferAttribute([
-      -0.5, 0, 0,
-      0.18, 0, 0,
-      0.06, 1, 0,
-    ], 3),
-  )
-  geometry.computeVertexNormals()
-  return geometry
-}
 
 /**
  * Deterministic outer-garden pollen sample, exposed so its spacing and
@@ -258,7 +220,6 @@ export function createCinematicGardenLife(
   const glintCount = count(options.glintCount, DEFAULT_GLINT_COUNT, MAX_GLINT_COUNT)
   const pollenDistance = positive(options.pollenDistance, DEFAULT_POLLEN_DISTANCE)
   const glintDistance = positive(options.glintDistance, DEFAULT_GLINT_DISTANCE)
-  const foregroundDistance = positive(options.foregroundDistance, DEFAULT_FOREGROUND_DISTANCE)
 
   const root = new Group()
   root.name = 'Cinematic garden life'
@@ -268,10 +229,7 @@ export function createCinematicGardenLife(
   pollenLayer.name = 'Cinematic garden pollen layer'
   const glintLayer = new Group()
   glintLayer.name = 'Cinematic garden lake-glint layer'
-  const foregroundLayer = new Group()
-  foregroundLayer.name = 'Cinematic foreground botanical frame'
-  foregroundLayer.renderOrder = 2
-  root.add(pollenLayer, glintLayer, foregroundLayer)
+  root.add(pollenLayer, glintLayer)
 
   const pollenGeometry = new CircleGeometry(1, 10)
   const pollenMaterial = new MeshBasicMaterial({
@@ -309,104 +267,6 @@ export function createCinematicGardenLife(
   glints.instanceMatrix.setUsage(DynamicDrawUsage)
   glintLayer.add(glints)
 
-  // The authored plate already supplies the distant lake, mountains, and
-  // flower beds. These near-edge botanical details add a second depth cue:
-  // low grass, a few recognizable blossoms, and grounded stones. They never
-  // enter the center play corridor, so the added realism does not become
-  // visual noise around the cougar or the ball.
-  const grassGeometry = createGrassBladeGeometry()
-  const grassMaterial = new MeshBasicMaterial({
-    color: 0x397447,
-    transparent: true,
-    opacity: 0.76,
-    depthTest: true,
-    depthWrite: false,
-    side: DoubleSide,
-    fog: true,
-    toneMapped: false,
-  })
-  const grass = new InstancedMesh(grassGeometry, grassMaterial, FOREGROUND_BLADE_COUNT)
-  grass.name = 'Near garden grass blades'
-  grass.frustumCulled = false
-  grass.instanceMatrix.setUsage(DynamicDrawUsage)
-  foregroundLayer.add(grass)
-
-  const petalGeometry = new CircleGeometry(1, 8)
-  const petalMaterial = new MeshBasicMaterial({
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.86,
-    depthTest: true,
-    depthWrite: false,
-    side: DoubleSide,
-    fog: true,
-    toneMapped: false,
-  })
-  const petals = new InstancedMesh(
-    petalGeometry,
-    petalMaterial,
-    FOREGROUND_FLOWER_COUNT * PETALS_PER_FLOWER,
-  )
-  petals.name = 'Near garden flower petals'
-  petals.frustumCulled = false
-  petals.instanceMatrix.setUsage(DynamicDrawUsage)
-  foregroundLayer.add(petals)
-
-  const flowerCenterGeometry = new CircleGeometry(1, 10)
-  const flowerCenterMaterial = new MeshBasicMaterial({
-    color: 0xffd477,
-    transparent: true,
-    opacity: 0.95,
-    depthTest: true,
-    depthWrite: false,
-    side: DoubleSide,
-    fog: true,
-    toneMapped: false,
-  })
-  const flowerCenters = new InstancedMesh(
-    flowerCenterGeometry,
-    flowerCenterMaterial,
-    FOREGROUND_FLOWER_COUNT,
-  )
-  flowerCenters.name = 'Near garden flower centers'
-  flowerCenters.frustumCulled = false
-  flowerCenters.instanceMatrix.setUsage(DynamicDrawUsage)
-  foregroundLayer.add(flowerCenters)
-
-  const rockGeometry = new DodecahedronGeometry(1, 0)
-  const rockMaterial = new MeshStandardMaterial({
-    color: 0x756b5c,
-    roughness: 0.96,
-    metalness: 0,
-    fog: true,
-  })
-  const rocks = new Group()
-  rocks.name = 'Near garden grounding stones'
-  for (const [side, lane, scale] of FOREGROUND_ROCKS) {
-    const rock = new Mesh(rockGeometry, rockMaterial)
-    rock.name = 'Garden grounding stone'
-    rock.userData.side = side
-    rock.userData.lane = lane
-    rock.userData.scale = scale
-    rock.scale.set(scale * 1.45, scale * 0.6, scale)
-    rock.rotation.set(0.08, side * 0.2, side * 0.12)
-    rock.castShadow = false
-    rock.receiveShadow = false
-    rocks.add(rock)
-  }
-  foregroundLayer.add(rocks)
-
-  const petalColour = new Color()
-  const petalPalette = [0xffb6c7, 0xfff7df, 0xd8a9df, 0xffc5d0]
-  for (let flower = 0; flower < FOREGROUND_FLOWER_COUNT; flower++) {
-    for (let petal = 0; petal < PETALS_PER_FLOWER; petal++) {
-      petals.setColorAt(
-        flower * PETALS_PER_FLOWER + petal,
-        petalColour.setHex(petalPalette[flower % petalPalette.length]!),
-      )
-    }
-  }
-  if (petals.instanceColor) petals.instanceColor.needsUpdate = true
 
   const pollenColour = new Color()
   for (let index = 0; index < pollenCount; index++) {
@@ -428,7 +288,6 @@ export function createCinematicGardenLife(
   const instancePosition = new Vector3()
   const instanceScale = new Vector3()
   const instanceQuaternion = new Quaternion()
-  const instanceAxis = new Vector3(0, 0, 1)
   const instanceMatrix = new Matrix4()
   let burstStartedAt: number | null = null
   let lastElapsed = 0
@@ -452,7 +311,6 @@ export function createCinematicGardenLife(
     cameraForward.set(0, 0, -1).applyQuaternion(cameraQuaternion)
     placeLayer(pollenLayer, pollenDistance)
     placeLayer(glintLayer, glintDistance)
-    placeLayer(foregroundLayer, foregroundDistance)
 
     const pollenViewport = viewportAtDistance(camera, pollenDistance)
     for (let index = 0; index < pollenCount; index++) {
@@ -476,72 +334,6 @@ export function createCinematicGardenLife(
     glints.instanceMatrix.needsUpdate = true
     glints.visible = glintCount > 0
 
-    const foregroundViewport = viewportAtDistance(camera, foregroundDistance)
-    const foregroundTime = reducedMotion ? 0 : elapsed
-
-    for (let index = 0; index < FOREGROUND_BLADE_COUNT; index++) {
-      const side = index % 2 === 0 ? -1 : 1
-      const lane = Math.floor(index / 2)
-      const x = side * foregroundViewport.width * (0.39 + ((lane * 0.031) % 0.14))
-      const y = -foregroundViewport.height * (0.47 - (lane % 4) * 0.012)
-      const phase = index * 1.73 + 0.4
-      const sway = reducedMotion
-        ? 0
-        : Math.sin(foregroundTime * 1.08 + phase) * 0.09
-      instancePosition.set(x, y, 0.02 + index * 0.0006)
-      instanceScale.set(
-        foregroundViewport.width * (0.0045 + (lane % 3) * 0.0008),
-        foregroundViewport.height * (0.041 + (lane % 4) * 0.008),
-        1,
-      )
-      instanceQuaternion.setFromAxisAngle(instanceAxis, sway + side * 0.11)
-      instanceMatrix.compose(instancePosition, instanceQuaternion, instanceScale)
-      grass.setMatrixAt(index, instanceMatrix)
-    }
-    grass.instanceMatrix.needsUpdate = true
-
-    for (let flowerIndex = 0; flowerIndex < FOREGROUND_FLOWERS.length; flowerIndex++) {
-      const [normalizedX, normalizedY, size] = FOREGROUND_FLOWERS[flowerIndex]!
-      const phase = flowerIndex * 1.37 + 0.8
-      const drift = reducedMotion
-        ? 0
-        : Math.sin(foregroundTime * 0.72 + phase) * foregroundViewport.width * 0.002
-      const centerX = normalizedX * foregroundViewport.width + drift
-      const centerY = normalizedY * foregroundViewport.height
-      const petalRadius = foregroundViewport.width * 0.0062 * size
-      for (let petalIndex = 0; petalIndex < PETALS_PER_FLOWER; petalIndex++) {
-        const angle = (petalIndex / PETALS_PER_FLOWER) * Math.PI * 2
-        instancePosition.set(
-          centerX + Math.cos(angle) * petalRadius * 0.68,
-          centerY + Math.sin(angle) * petalRadius * 0.68,
-          0.055 + flowerIndex * 0.0004,
-        )
-        instanceScale.set(petalRadius, petalRadius * 0.68, 1)
-        instanceQuaternion.setFromAxisAngle(instanceAxis, angle)
-        instanceMatrix.compose(instancePosition, instanceQuaternion, instanceScale)
-        petals.setMatrixAt(flowerIndex * PETALS_PER_FLOWER + petalIndex, instanceMatrix)
-      }
-      instancePosition.set(centerX, centerY, 0.06 + flowerIndex * 0.0004)
-      instanceScale.setScalar(petalRadius * 0.58)
-      instanceMatrix.compose(instancePosition, instanceQuaternion.identity(), instanceScale)
-      flowerCenters.setMatrixAt(flowerIndex, instanceMatrix)
-    }
-    petals.instanceMatrix.needsUpdate = true
-    flowerCenters.instanceMatrix.needsUpdate = true
-
-    for (let index = 0; index < FOREGROUND_ROCKS.length; index++) {
-      const [side, normalizedX, scale] = FOREGROUND_ROCKS[index]!
-      const rock = rocks.children[index]
-      if (!(rock instanceof Mesh)) continue
-      rock.position.set(
-        side * foregroundViewport.width * normalizedX,
-        -foregroundViewport.height * 0.49,
-        0.1 + index * 0.001,
-      )
-      rock.rotation.y = side * (0.18 + Math.sin(foregroundTime * 0.08 + index) * 0.012)
-      rock.scale.set(scale * 1.45, scale * 0.6, scale)
-    }
-    foregroundLayer.visible = true
   }
 
   function burst(elapsedSeconds = lastElapsed): void {
@@ -559,14 +351,6 @@ export function createCinematicGardenLife(
     pollenMaterial.dispose()
     glintGeometry.dispose()
     glintMaterial.dispose()
-    grassGeometry.dispose()
-    grassMaterial.dispose()
-    petalGeometry.dispose()
-    petalMaterial.dispose()
-    flowerCenterGeometry.dispose()
-    flowerCenterMaterial.dispose()
-    rockGeometry.dispose()
-    rockMaterial.dispose()
   }
 
   return { root, pollen, glints, update, burst, dispose }

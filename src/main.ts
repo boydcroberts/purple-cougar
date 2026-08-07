@@ -29,16 +29,21 @@ import { createPlayUi } from './playUi'
 import { createCinematicButterfly } from './worlds/cinematicButterfly'
 import {
   CINEMATIC_ENVIRONMENT_DISTANCE,
-  cinematicGardenRailHeadY,
+  GARDEN_TUNNEL_U,
+  cinematicGardenPlateU,
+  cinematicGardenRailYAtU,
   createCinematicEnvironment,
+  fitCinematicPlate,
 } from './worlds/cinematicEnvironment'
 import { createCinematicGardenLife } from './worlds/cinematicGardenLife'
 import { createCinematicSquirrel } from './worlds/cinematicSquirrel'
 import {
   CINEMATIC_TRAIN_DISTANCE,
+  CINEMATIC_TRAIN_WIDTH,
   cinematicTrainWheelContactY,
   createCinematicTrain,
 } from './worlds/cinematicTrain'
+import { createCinematicTunnel } from './worlds/cinematicTunnel'
 import { GARDEN_DISCOVERIES } from './worlds/gardenDiscoveries'
 import type { ParkBackdrop } from './worlds/parkBackdrop'
 import type { MeadowSlice } from './worlds/meadowSlice'
@@ -87,13 +92,20 @@ const forceModel = modelDebugTarget === '1' || modelDebugTarget === 'v2'
 // The cinematic plate now has more garden and train information worth seeing.
 // Scale the invisible physics driver with the visible hero so the cuff, ball,
 // contact shadow, and pointer target remain a single coherent character.
-// Give the garden more breathing room around the hero while keeping the
-// physics driver, cuff, ball, and pointer target on the same scaled rig.
-const DESKTOP_HERO_SCALE = 0.68
+// Keep the hero closer to the camera like the storybook reference on wide
+// screens, while compact browser panes back off enough to keep the whole play
+// sentence visible.
+const WIDE_HERO_SCALE = 0.78
+const COMPACT_HERO_SCALE = 0.66
 // The prior primitive-heavy landscape remains available for diagnosis, but the
 // shipping desktop experience uses a coherent authored environment so the
 // world can meet the cougar's image quality without crowding her.
 const useCinematicScenery = searchParams.get('legacyScenery') !== '1'
+// The current storybook plate leaves the elevated bridge empty, so the authored
+// train card is again the moving landmark by default. `?animatedTrain=0`
+// remains useful for isolating background-art issues.
+const useAnimatedTrainOverlay =
+  useCinematicScenery && searchParams.get('animatedTrain') !== '0'
 // Keep the dependable procedural sky and meadow visible until the authored
 // scenic plate has actually loaded. This avoids a black fullscreen card on a
 // slow connection or an unavailable asset.
@@ -114,7 +126,7 @@ reducedMotionQuery?.addEventListener('change', (event) => {
 
 const cinematicEnvironment = useCinematicScenery ? createCinematicEnvironment() : null
 const cinematicGardenLife = useCinematicScenery ? createCinematicGardenLife() : null
-const cinematicTrain = useCinematicScenery
+const cinematicTrain = useAnimatedTrainOverlay
   ? createCinematicTrain({
       // Keep this as a live getter instead of spreading `motion`: the OS
       // preference can change while the page is open, and the train must stop
@@ -122,18 +134,33 @@ const cinematicTrain = useCinematicScenery
       get reducedMotion() {
         return motion.reducedMotion
       },
-      screenY: (activeCamera) => {
+      screenY: (activeCamera, lateral) => {
         const camera = activeCamera as typeof stage.camera
-        const railY = cinematicGardenRailHeadY(camera.fov, camera.aspect)
+        const depthRatio = CINEMATIC_TRAIN_DISTANCE / CINEMATIC_ENVIRONMENT_DISTANCE
         // Cards at different camera depths align in projected screen space,
         // not by copying their local y coordinate directly.
-        return (
-          railY * (CINEMATIC_TRAIN_DISTANCE / CINEMATIC_ENVIRONMENT_DISTANCE) -
-          cinematicTrainWheelContactY()
+        const plateU = cinematicGardenPlateU(
+          camera.fov,
+          camera.aspect,
+          lateral / depthRatio,
         )
+        // The painted deck climbs from the tunnel to the right edge, so the
+        // wheel line has to be read at the train's current position along it.
+        const railY = cinematicGardenRailYAtU(camera.fov, camera.aspect, plateU)
+        return railY * depthRatio - cinematicTrainWheelContactY()
+      },
+      tunnelLateral: (activeCamera) => {
+        const camera = activeCamera as typeof stage.camera
+        const plate = fitCinematicPlate(camera.fov, camera.aspect)
+        const depthRatio = CINEMATIC_TRAIN_DISTANCE / CINEMATIC_ENVIRONMENT_DISTANCE
+        return (GARDEN_TUNNEL_U - 0.5) * plate.width * depthRatio
       },
     })
   : null
+// The portal sits marginally nearer than the train so its dark mouth really
+// covers the emerging locomotive instead of relying on an opacity ramp.
+const CINEMATIC_TUNNEL_DISTANCE = CINEMATIC_TRAIN_DISTANCE - 0.4
+const cinematicTunnel = useAnimatedTrainOverlay ? createCinematicTunnel() : null
 const cinematicSquirrel = useCinematicScenery ? createCinematicSquirrel() : null
 const cinematicButterfly = useCinematicScenery ? createCinematicButterfly(motion) : null
 let cinematicSceneryReady = false
@@ -145,9 +172,49 @@ let hasStartedPlaying = false
 function syncCinematicCardVisibility(): void {
   if (!useCinematicScenery) return
   cinematicGardenLife!.root.visible = cinematicSceneryReady
-  cinematicTrain!.root.visible = cinematicSceneryReady
-  cinematicSquirrel!.root.visible = cinematicSceneryReady && cinematicSquirrelActivated
+  if (cinematicTrain) cinematicTrain.root.visible = cinematicSceneryReady
+  if (cinematicTunnel) cinematicTunnel.root.visible = cinematicSceneryReady
+  // The squirrel is the cougar's companion, not a hidden easter egg — every
+  // art reference has the two of them together. She appears with the garden.
+  cinematicSquirrel!.root.visible = cinematicSceneryReady
   cinematicButterfly!.root.visible = cinematicSceneryReady && cinematicButterflyActivated
+}
+
+const tunnelForward = new Vector3()
+/**
+ * Locks the portal to the point where the painted deck runs into the rock.
+ * It is camera-locked exactly like the plate and the train, so the arch never
+ * drifts off its own cliff during a follow-camera move.
+ */
+function updateCinematicTunnel(): void {
+  if (!cinematicTunnel) return
+  const camera = stage.camera
+  const plate = fitCinematicPlate(camera.fov, camera.aspect)
+  const tunnelDepthRatio = CINEMATIC_TUNNEL_DISTANCE / CINEMATIC_ENVIRONMENT_DISTANCE
+  const plateX = (GARDEN_TUNNEL_U - 0.5) * plate.width
+  const railY = cinematicGardenRailYAtU(camera.fov, camera.aspect, GARDEN_TUNNEL_U)
+  // Sized off the train card so the locomotive always fits through its own
+  // portal, whatever the viewport does to the plate.
+  const trainHeight =
+    (CINEMATIC_TRAIN_WIDTH / (1774 / 887)) *
+    (CINEMATIC_TUNNEL_DISTANCE / CINEMATIC_TRAIN_DISTANCE)
+  // Measured against the rendered frame: the visible locomotive is roughly
+  // half its card's height, and the portal only needs modest clearance over
+  // it. A mouth sized off the full card swallowed the waterfall behind it.
+  const mouthHeight = trainHeight * 0.285
+  cinematicTunnel.place(
+    plateX * tunnelDepthRatio,
+    railY * tunnelDepthRatio,
+    mouthHeight * 0.86,
+    mouthHeight,
+  )
+
+  camera.updateWorldMatrix(true, false)
+  camera.getWorldDirection(tunnelForward)
+  cinematicTunnel.root.position
+    .copy(camera.position)
+    .addScaledVector(tunnelForward, CINEMATIC_TUNNEL_DISTANCE)
+  cinematicTunnel.root.quaternion.copy(camera.quaternion)
 }
 
 if (useCinematicScenery) {
@@ -158,12 +225,13 @@ if (useCinematicScenery) {
   stage.scene.add(
     cinematicEnvironment!.root,
     cinematicGardenLife!.root,
-    cinematicTrain!.root,
     cinematicSquirrel!.root,
     cinematicButterfly!.root,
   )
+  if (cinematicTrain) stage.scene.add(cinematicTrain.root)
+  if (cinematicTunnel) stage.scene.add(cinematicTunnel.root)
   void cinematicEnvironment!.load()
-  void cinematicTrain!.load()
+  if (cinematicTrain) void cinematicTrain.load()
   void cinematicButterfly!.load()
   stage.render()
 }
@@ -175,6 +243,18 @@ const modelAssetUrl =
 const palette = createPalette({ uvCountershade: forceProcedural })
 let cougar: Quadruped
 let heroVisual: HeroBillboard | null = null
+
+function responsiveHeroScale(): number {
+  const aspect = window.innerWidth / Math.max(1, window.innerHeight)
+  if (aspect >= 1.2) return WIDE_HERO_SCALE
+  if (aspect <= 0.72) return COMPACT_HERO_SCALE
+  const t = (aspect - 0.72) / (1.2 - 0.72)
+  return COMPACT_HERO_SCALE + (WIDE_HERO_SCALE - COMPACT_HERO_SCALE) * t
+}
+
+function applyResponsiveHeroScale(): void {
+  if (heroVisual) cougar.root.scale.setScalar(responsiveHeroScale())
+}
 
 if (forceProcedural) {
   const { createQuadruped } = await import('./cougar/quadruped')
@@ -191,7 +271,7 @@ if (forceProcedural) {
   cougar = createHeroDriverQuadruped()
   try {
     heroVisual = await loadHeroBillboard(cougar.root)
-    cougar.root.scale.setScalar(DESKTOP_HERO_SCALE)
+    applyResponsiveHeroScale()
     stage.setFlatHeroMode(true)
   } catch (error) {
     console.warn(
@@ -796,7 +876,10 @@ window.addEventListener('keydown', (event) => {
     handleTap()
   }
 })
-window.addEventListener('resize', () => stage.resize())
+window.addEventListener('resize', () => {
+  stage.resize()
+  applyResponsiveHeroScale()
+})
 
 // --- Loop: deterministic fixed-step physics behind a smooth render layer. ---
 let lastFrame = performance.now()
@@ -880,10 +963,15 @@ function frame(now: number): void {
       cinematicEnvironmentFading = false
       stage.setCinematicEnvironmentMode(true)
       cinematicSceneryReady = true
+      if (!cinematicSquirrelActivated) {
+        cinematicSquirrelActivated = true
+        cinematicSquirrel!.activate(elapsed)
+      }
       syncCinematicCardVisibility()
       refreshExplorationControl()
     }
-    cinematicTrain!.update(stage.camera, elapsed)
+    cinematicTrain?.update(stage.camera, elapsed)
+    updateCinematicTunnel()
     cinematicGardenLife!.update(stage.camera, elapsed, motion.reducedMotion)
     cinematicSquirrel!.update(stage.camera, elapsed, motion.reducedMotion)
     cinematicButterfly!.update(stage.camera, elapsed)
@@ -926,8 +1014,19 @@ window.__pc = {
   roar: () => roarNow(),
   cameraPos: () => stage.camera.position.toArray() as [number, number, number],
   squirrelDash: () => {
-    if (useCinematicScenery) cinematicSquirrel!.dashNow(elapsed)
-    else squirrel!.dashNow()
+    if (useCinematicScenery) {
+      // `dashNow()` only flips the sprite's own visibility. Its whole card
+      // group is still gated behind `cinematicSquirrelActivated`, which only
+      // the `ball-tapped` story beat normally sets — so before this, every QA
+      // capture of the easter egg came back empty and it was reported as
+      // broken when the real play flow shows it fine.
+      if (!cinematicSquirrelActivated) {
+        cinematicSquirrelActivated = true
+        cinematicSquirrel!.activate(elapsed)
+      }
+      syncCinematicCardVisibility()
+      cinematicSquirrel!.dashNow(elapsed)
+    } else squirrel!.dashNow()
   },
   // Where does a world point land on screen? Scene dressing has to be framed
   // against the live camera, not against the authored constants — the follow

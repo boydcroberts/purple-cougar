@@ -1,19 +1,18 @@
 /**
  * A single Eastern tiger swallowtail that lives in the garden's outer flower bed.
  *
- * The source is an authored chroma plate, not a sprite atlas. Keeping it as a
- * camera-locked card preserves the photographic wing detail while guaranteeing
- * that the butterfly never drifts through Purple Cougar's central play space.
+ * The source is an authored alpha-matted plate, not a sprite atlas. Keeping it
+ * as a camera-locked card preserves the wing detail while guaranteeing that the
+ * butterfly never drifts through Purple Cougar's central play space.
  */
 import {
-  Color,
   DoubleSide,
   Group,
   Mesh,
   PlaneGeometry,
   Quaternion,
   Raycaster,
-  ShaderMaterial,
+  MeshBasicMaterial,
   SRGBColorSpace,
   Texture,
   TextureLoader,
@@ -21,11 +20,11 @@ import {
 } from 'three'
 import type { Camera, Intersection } from 'three'
 
-/** Public Vite path for the authored, green-screen swallowtail plate. */
+/** Public Vite path for the authored, alpha-matted swallowtail plate. */
 export const EASTERN_TIGER_SWALLOWTAIL_ASSET_URL =
-  '/assets/eastern-tiger-swallowtail-chroma-v1.webp'
+  '/assets/eastern-tiger-swallowtail-hero-v2.webp'
 
-const SOURCE_ASPECT = 1536 / 1024
+const SOURCE_ASPECT = 973 / 912
 const DEFAULT_DISTANCE = 12
 const DEFAULT_HALF_VIEWPORT_WIDTH = 10
 
@@ -75,8 +74,8 @@ export interface CinematicButterflyOptions {
 export interface CinematicButterfly {
   /** Add this to the stage scene once. It is positioned in camera space by update(). */
   readonly root: Group
-  /** The keyed photographic card, available for intentional renderer tuning. */
-  readonly image: Mesh<PlaneGeometry, ShaderMaterial>
+  /** The matted swallowtail card, available for intentional renderer tuning. */
+  readonly image: Mesh<PlaneGeometry, MeshBasicMaterial>
   readonly assetUrl: string
   /** Load the authored plate once a browser runtime is available. */
   load(loader?: CinematicButterflyTextureLoader): Promise<boolean>
@@ -85,7 +84,7 @@ export interface CinematicButterfly {
   /** Keep the flower-bed card camera-locked and advance its small hover. */
   update(camera: Camera, elapsedSeconds: number): void
   /**
-   * Returns the actual wing/body intersection, or null. Green-key background
+   * Returns the actual wing/body intersection, or null. Transparent background
    * pixels on the rectangular card are intentionally never tappable.
    */
   hitTest(raycaster: Raycaster): Intersection | null
@@ -170,9 +169,21 @@ export function butterflyFlowerBedPose(
   // hero. On desktop the butterfly remains intentionally small and detailed.
   const cardHeight = Math.min(height * 0.18, width * 0.16)
   const cardWidth = cardHeight * SOURCE_ASPECT
-  const horizontalAmplitude = reducedMotion ? 0 : cardHeight * 0.042
-  const verticalAmplitude = reducedMotion ? 0 : cardHeight * 0.078
+  // A butterfly that hovers inside a tenth of a card-width reads as a sticker
+  // taped to the flower bed. It now wanders a real patch on a slow
+  // figure-eight — but the wander is derived from the corridor left between
+  // the screen edge and the centre play space, never a fixed multiple of card
+  // size, so widening it can't push her across the hero at any aspect ratio.
   const edgeGutter = Math.min(width * 0.04, height * 0.035)
+  const centreExclusion = width * 0.25
+  const corridor = Math.max(
+    0,
+    width * 0.5 - centreExclusion - cardWidth - edgeGutter,
+  )
+  const horizontalAmplitude = reducedMotion
+    ? 0
+    : Math.min(cardWidth * 0.85, corridor * 0.45)
+  const verticalAmplitude = reducedMotion ? 0 : cardHeight * 0.62
   const farthestCenter = Math.max(
     0,
     width * 0.5 - cardWidth * 0.5 - edgeGutter - horizontalAmplitude,
@@ -180,8 +191,20 @@ export function butterflyFlowerBedPose(
   // A quarter-screen central exclusion remains clear even at narrow aspects.
   const leftFlowerBedCenter = Math.min(width * 0.37, farthestCenter)
   const time = reducedMotion ? 0 : Math.max(0, finite(elapsedSeconds, 0))
-  const hoverX = Math.cos(time * 1.13 + 0.7) * horizontalAmplitude
-  const hoverY = Math.sin(time * 1.47 + 0.3) * verticalAmplitude
+  // Two incommensurate rates keep the loop from ever visibly repeating.
+  const hoverX = Math.sin(time * 0.53) * horizontalAmplitude
+  const hoverY =
+    (Math.sin(time * 1.06 + 0.4) * 0.6 + Math.sin(time * 0.31 + 1.1) * 0.4) *
+    verticalAmplitude
+
+  // Wingbeat: the card is a wings-open top view, so closing the wings toward
+  // the camera is a horizontal squash. A shallow few percent looked painted;
+  // a real swallowtail nearly disappears edge-on at the top of the stroke.
+  const beat = Math.sin(time * 8.4)
+  const closed = Math.pow(Math.abs(beat), 0.65)
+  const flap = reducedMotion ? 1 : 1 - closed * 0.58
+  // Banking into the turn, driven by the horizontal velocity of the path.
+  const drift = Math.cos(time * 0.53)
 
   return {
     x: -leftFlowerBedCenter + hoverX,
@@ -189,18 +212,19 @@ export function butterflyFlowerBedPose(
     y: -height * 0.31 + hoverY,
     width: cardWidth,
     height: cardHeight,
-    roll: reducedMotion ? 0 : Math.sin(time * 2.6 + 0.45) * 0.032,
-    // A photograph cannot supply a true wing cycle; this is deliberately only
-    // a few percent so it reads as a wing catch, not a distorted sticker.
-    scaleX: reducedMotion ? 1 : 1 + Math.sin(time * 5.1 + 0.2) * 0.025,
-    scaleY: reducedMotion ? 1 : 1 - Math.sin(time * 5.1 + 0.2) * 0.008,
+    roll: reducedMotion ? 0 : drift * 0.16 + Math.sin(time * 2.6 + 0.45) * 0.03,
+    scaleX: flap,
+    // A touch of lift on the upstroke stops the squash reading as a flat
+    // horizontal scale.
+    scaleY: reducedMotion ? 1 : 1 + closed * 0.05,
   }
 }
 
 type ButterflyPolygon = readonly (readonly [number, number])[]
 
 /*
- * Conservative interiors of the photographed subject in source-image space.
+ * Conservative interiors of the matted subject in source-image space, measured
+ * against the trimmed v2 plate (973x912).
  * The visual source has y=0 at its top, while PlaneGeometry/Raycaster UVs use
  * y=0 at the bottom, so `isButterflySubjectUv` flips y before testing.
  *
@@ -211,46 +235,46 @@ type ButterflyPolygon = readonly (readonly [number, number])[]
 const BUTTERFLY_HIT_POLYGONS: readonly ButterflyPolygon[] = [
   // Tall upper-left forewing.
   [
-    [0.235, 0.08],
-    [0.36, 0.11],
-    [0.49, 0.34],
-    [0.535, 0.47],
-    [0.44, 0.54],
-    [0.285, 0.43],
+    [0.064, 0.027],
+    [0.261, 0.061],
+    [0.466, 0.319],
+    [0.537, 0.465],
+    [0.387, 0.544],
+    [0.143, 0.420],
   ],
   // Scalloped lower-left wing, omitting its thin tail tip.
   [
-    [0.285, 0.43],
-    [0.45, 0.5],
-    [0.49, 0.66],
-    [0.39, 0.79],
-    [0.265, 0.7],
-    [0.24, 0.55],
+    [0.143, 0.420],
+    [0.403, 0.499],
+    [0.466, 0.679],
+    [0.308, 0.825],
+    [0.111, 0.723],
+    [0.072, 0.555],
   ],
   // Broad right forewing.
   [
-    [0.51, 0.45],
-    [0.67, 0.42],
-    [0.82, 0.47],
-    [0.825, 0.6],
-    [0.655, 0.69],
-    [0.525, 0.63],
+    [0.498, 0.443],
+    [0.750, 0.409],
+    [0.987, 0.465],
+    [0.995, 0.611],
+    [0.727, 0.712],
+    [0.521, 0.645],
   ],
   // Lower wing and visible blue/orange tail markings.
   [
-    [0.45, 0.61],
-    [0.61, 0.66],
-    [0.61, 0.78],
-    [0.49, 0.89],
-    [0.37, 0.8],
+    [0.403, 0.622],
+    [0.656, 0.679],
+    [0.656, 0.813],
+    [0.466, 0.937],
+    [0.277, 0.836],
   ],
   // The dark body joins the four wing regions into one forgiving target.
   [
-    [0.455, 0.41],
-    [0.525, 0.43],
-    [0.55, 0.58],
-    [0.49, 0.66],
-    [0.445, 0.58],
+    [0.411, 0.398],
+    [0.521, 0.420],
+    [0.561, 0.589],
+    [0.466, 0.679],
+    [0.395, 0.589],
   ],
 ]
 
@@ -304,56 +328,20 @@ export function createCinematicButterfly(
   root.add(hover)
 
   const geometry = new PlaneGeometry(1, 1)
-  const material = new ShaderMaterial({
+  // Keying in the shader cost a green rim on every antialiased wing edge and
+  // still lost the antennae. The shipped plate is now a real alpha matte,
+  // keyed and despilled offline, so the material is plain alpha.
+  const material = new MeshBasicMaterial({
+    map: null,
     transparent: true,
+    alphaTest: 0.02,
     depthTest: true,
-    // The butterfly must be hidden by Purple Cougar, but transparent keyed
-    // pixels must never write a rectangular occluder into the depth buffer.
+    // The butterfly must be hidden by Purple Cougar, but transparent pixels
+    // must never write a rectangular occluder into the depth buffer.
     depthWrite: false,
     side: DoubleSide,
     fog: false,
     toneMapped: false,
-    uniforms: {
-      map: { value: null },
-      // The shipped WebP border samples at #04f816. Color keeps this key in
-      // Three's linear working space alongside the decoded sRGB texture.
-      keyColor: { value: new Color(0x04f816) },
-    },
-    vertexShader: `
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D map;
-      uniform vec3 keyColor;
-      varying vec2 vUv;
-
-      void main() {
-        vec4 source = texture2D(map, vUv);
-        float keyDistance = distance(source.rgb, keyColor);
-        float alpha = smoothstep(0.045, 0.18, keyDistance);
-
-        // Antialiased wing edges retain a small amount of the original key
-        // green. Suppress only green that dominates BOTH red and blue, so the
-        // swallowtail's warm yellow wings and blue tail spots stay untouched.
-        float greenExcess = max(0.0, source.g - max(source.r, source.b));
-        float spill = smoothstep(0.025, 0.19, greenExcess)
-          * (1.0 - smoothstep(0.22, 0.48, keyDistance));
-        vec3 despilled = vec3(
-          min(1.0, source.r + spill * 0.012),
-          max(0.0, source.g - spill * greenExcess * 0.92),
-          min(1.0, source.b + spill * 0.006)
-        );
-        vec3 colour = mix(source.rgb, despilled, clamp(spill + (1.0 - alpha) * 0.42, 0.0, 1.0));
-
-        if (alpha < 0.002) discard;
-        gl_FragColor = vec4(colour, source.a * alpha);
-      }
-    `,
   })
   const image = new Mesh(geometry, material)
   image.name = 'Eastern tiger swallowtail image'
@@ -374,7 +362,7 @@ export function createCinematicButterfly(
     const previousOwnedTexture = ownedTexture
     texture.colorSpace = SRGBColorSpace
     texture.generateMipmaps = true
-    material.uniforms.map!.value = texture
+    material.map = texture
     material.needsUpdate = true
     image.visible = true
     ownedTexture = ownsTexture ? texture : null
@@ -430,7 +418,7 @@ export function createCinematicButterfly(
   function hitTest(
     raycaster: Raycaster,
   ): Intersection | null {
-    if (disposed || !image.visible || !material.uniforms.map!.value) return null
+    if (disposed || !image.visible || material.map === null) return null
     root.updateWorldMatrix(true, true)
     for (const intersection of raycaster.intersectObject(image, false)) {
       if (intersection.uv && isButterflySubjectUv(intersection.uv)) return intersection
@@ -444,7 +432,7 @@ export function createCinematicButterfly(
     loadGeneration++
     root.removeFromParent()
     image.visible = false
-    material.uniforms.map!.value = null
+    material.map = null
     geometry.dispose()
     material.dispose()
     ownedTexture?.dispose()

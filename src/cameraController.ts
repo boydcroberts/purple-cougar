@@ -31,21 +31,18 @@ export function createFollowCamera(camera: PerspectiveCamera): FollowCamera {
   let azimuth = BASE_AZIMUTH
 
   function framingDistance(): number {
-    // A portrait viewport has much less horizontal field of view. Back the
-    // camera away smoothly so the cougar, ball, ramp, and bell remain one
-    // readable play sentence instead of cropping into unrelated fragments.
-    // iPad portrait is still wide enough for the authored play pad. Only the
-    // much narrower phone shapes need extra distance; backing away on iPad
-    // made the hero and landmarks feel toy-sized in an ocean of sky.
-    const narrowness = Math.max(0, 0.68 - camera.aspect)
-    return BASE_DISTANCE * (1 + narrowness * 1.6)
+    // Square-ish browser panes have the same problem as phone portrait: the
+    // horizontal field disappears, and a close camera turns the storybook scene
+    // into a cropped cougar portrait. Back off gradually below desktop width.
+    const compactness = Math.max(0, 1.18 - camera.aspect)
+    return BASE_DISTANCE * (1 + compactness * 0.52)
   }
 
   function portraitFramingOffset(): number {
     // The three-quarter hero pose leans toward screen-left. On a phone, a
     // slight look-target shift keeps her face in frame while preserving the
     // ball's generous tap space on the right.
-    return -Math.max(0, 0.68 - camera.aspect) * 1.45
+    return -Math.max(0, 0.78 - camera.aspect) * 1.15
   }
 
   function reset(): void {

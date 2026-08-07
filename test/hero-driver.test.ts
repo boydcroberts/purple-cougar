@@ -4,6 +4,7 @@ import {
   createHeroDriverQuadruped,
   deformHeroPoint,
   isHeroHitUv,
+  sampleHeroIdleBeat,
   type HeroDeformationPose,
 } from '../src/cougar/heroBillboard'
 
@@ -18,6 +19,33 @@ const neutralPose: HeroDeformationPose = {
 }
 
 describe('reference-matched hero driver', () => {
+  it('schedules one readable idle beat at a time, with calm in between', () => {
+    const kinds = ['headTilt', 'tailFlick', 'earPerk', 'wiggle'] as const
+    const seen = new Set<string>()
+
+    for (let step = 0; step < 2200; step++) {
+      const beat = sampleHeroIdleBeat(step * 0.05)
+      const active = kinds.filter((kind) => Math.abs(beat[kind]) > 1e-6)
+      // Two beats at once would read as a twitch rather than a character.
+      expect(active.length).toBeLessThanOrEqual(1)
+      for (const kind of active) {
+        seen.add(kind)
+        expect(Math.abs(beat[kind])).toBeLessThanOrEqual(1)
+      }
+    }
+
+    // Every kind of charm must actually get its turn.
+    expect([...seen].sort()).toEqual([...kinds].sort())
+
+    // The gap between beats is what makes the next one register.
+    const restingBeat = sampleHeroIdleBeat(5.4)
+    expect(kinds.every((kind) => restingBeat[kind] === 0)).toBe(true)
+
+    // Deterministic, and safe on a garbage clock.
+    expect(sampleHeroIdleBeat(3.2)).toEqual(sampleHeroIdleBeat(3.2))
+    expect(sampleHeroIdleBeat(Number.NaN)).toEqual(sampleHeroIdleBeat(0))
+  })
+
   it('does not treat transparent outer image padding as the cougar', () => {
     expect(isHeroHitUv(0.5, 0.5)).toBe(true)
     expect(isHeroHitUv(0.01, 0.5)).toBe(false)
@@ -81,10 +109,11 @@ describe('reference-matched hero driver', () => {
     }
     const target = { x: 0, y: 0 }
 
-    deformHeroPoint(-0.2, -0.62, 0.38, 0.08, pose, target)
+    // A planted front paw and the painted hind cuff, in the cub plate's UVs.
+    deformHeroPoint(-0.2, -0.62, 0.38, 0.05, pose, target)
     expect(target).toEqual({ x: -0.2, y: -0.62 })
 
-    deformHeroPoint(0.41, -0.39, 0.722, 0.239, pose, target)
+    deformHeroPoint(0.41, -0.39, 0.658, 0.262, pose, target)
     expect(target).toEqual({ x: 0.41, y: -0.39 })
   })
 
@@ -99,10 +128,10 @@ describe('reference-matched hero driver', () => {
       rightEarFlick: -0.05,
     }
     const samples = [
-      { base: [-0.5, 0.42], uv: [0.18, 0.74] }, // face
-      { base: [-0.62, 0.55], uv: [0.09, 0.84] }, // left ear
-      { base: [0.12, 0.18], uv: [0.56, 0.62] }, // ribcage
-      { base: [0.75, 0.02], uv: [0.94, 0.5] }, // tail tip
+      { base: [-0.5, 0.42], uv: [0.32, 0.70] }, // face
+      { base: [-0.62, 0.55], uv: [0.16, 0.845] }, // left ear
+      { base: [0.12, 0.18], uv: [0.50, 0.40] }, // ribcage
+      { base: [0.75, 0.02], uv: [0.912, 0.775] }, // tail tip
     ] as const
     const target = { x: 0, y: 0 }
 
@@ -133,21 +162,21 @@ describe('reference-matched hero driver', () => {
     }
     const target = { x: 0, y: 0 }
 
-    deformHeroPoint(0.12, 0.18, 0.56, 0.62, pose, target)
+    deformHeroPoint(0.12, 0.18, 0.50, 0.40, pose, target)
     expect(target.x).not.toBe(0.12)
 
-    deformHeroPoint(-0.24, 0.18, 0.365, 0.59, pose, target)
+    deformHeroPoint(-0.24, 0.18, 0.45, 0.47, pose, target)
     expect(target.y).not.toBe(0.18)
 
-    deformHeroPoint(0.6, 0.02, 0.96, 0.46, pose, target)
+    deformHeroPoint(0.6, 0.02, 0.912, 0.775, pose, target)
     expect(target.x).not.toBe(0.6)
     expect(target.y).not.toBe(0.02)
 
     // The exact rear-cuff and planted-paw samples must never inherit the
     // added body life; that keeps the ball tether visually trustworthy.
-    deformHeroPoint(0.41, -0.39, 0.722, 0.239, pose, target)
+    deformHeroPoint(0.41, -0.39, 0.658, 0.262, pose, target)
     expect(target).toEqual({ x: 0.41, y: -0.39 })
-    deformHeroPoint(-0.2, -0.62, 0.38, 0.08, pose, target)
+    deformHeroPoint(-0.2, -0.62, 0.38, 0.05, pose, target)
     expect(target).toEqual({ x: -0.2, y: -0.62 })
   })
 })
