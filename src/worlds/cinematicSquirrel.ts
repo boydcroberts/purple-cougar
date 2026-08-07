@@ -32,8 +32,14 @@ const FIRST_APPEARANCE = 8
 const CROSSING_SECONDS = 2.4
 const BETWEEN_APPEARANCES = 15
 const TWO_PI = Math.PI * 2
-/** Fraction of frame height. She is a co-star, so she gets real screen size. */
+/**
+ * She is a co-star, so she gets real screen size — but sizing her off frame
+ * height alone made her nearly as tall as the cougar in portrait, where the
+ * frame is tall and the hero itself scales down. The width cap keeps her in
+ * proportion to the cougar at any aspect.
+ */
 const SPRITE_HEIGHT_FRACTION = 0.2
+const SPRITE_WIDTH_FRACTION = 0.22
 /** Where she waits between dashes: just off the cougar's left shoulder. */
 const COMPANION_X = -0.29
 const COMPANION_Y = -0.2
@@ -179,7 +185,10 @@ export function createCinematicSquirrel(): CinematicSquirrel {
 
     const height = visibleHeight(camera)
     const width = height * camera.aspect
-    const spriteHeight = height * SPRITE_HEIGHT_FRACTION
+    const spriteHeight = Math.min(
+      height * SPRITE_HEIGHT_FRACTION,
+      width * SPRITE_WIDTH_FRACTION,
+    )
     const spriteWidth = spriteHeight * SOURCE_ASPECT
     image.scale.set(spriteWidth, spriteHeight, 1)
 
