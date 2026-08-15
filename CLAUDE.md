@@ -35,6 +35,21 @@ library, no build tool changes without a demonstrated need.
     npm run build
     npm run e2e          # Playwright config exists; e2e/ has no specs yet
 
+## Hosting and deployment
+
+- Production: `https://boydcroberts.github.io/purple-cougar/`.
+- GitHub Pages is the active host. Vercel was retired after the account reached
+  its usage limit; do not restore Vercel without a new owner decision.
+- `.github/workflows/deploy-pages.yml` validates, builds, and deploys on pushes
+  to `main`. The GitHub Pages environment allows deployments from `main`.
+- Production builds use `npm run build -- --mode github-pages`; `vite.config.ts`
+  applies `/purple-cougar/` only in that mode so local development stays at `/`.
+- Cloudflare Pages is the preferred fallback if Pages becomes insufficient.
+  Netlify works technically but is not preferred because its free tier meters
+  deployments, requests, and bandwidth through credits.
+- Never describe uncommitted local work as deployed. Verify the workflow and
+  live HTML and asset responses after every hosting change.
+
 ## Architecture
 
 - `src/main.ts` — the frame loop, input, story wiring. Owns scene composition:

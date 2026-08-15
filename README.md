@@ -1,5 +1,7 @@
 # Purple Cougar
 
+[Play Purple Cougar](https://boydcroberts.github.io/purple-cougar/)
+
 Purple Cougar is a touch-first 3D play experience for a child a little over
 three. The finished product is a small, joyful animated feature set in the
 **Purple Cougar Adventure Park**, centred on a lovable female purple cougar and
@@ -84,6 +86,19 @@ npm run validate runs TypeScript checking and Vitest. npm run e2e is configured
 for Playwright and should become a release gate once end-to-end specifications
 are added. On macOS, the existing Playwright/capture setup uses
 --use-angle=metal to avoid the slow SwiftShader fallback.
+
+## Hosting and deployment
+
+The production site is hosted by GitHub Pages at
+[boydcroberts.github.io/purple-cougar](https://boydcroberts.github.io/purple-cougar/).
+A push to `main` runs `.github/workflows/deploy-pages.yml`, which validates the
+project, builds it with the GitHub Pages base path, and publishes `dist`.
+
+Vercel is no longer the active hosting path because the account reached its
+usage limit. If GitHub Pages eventually stops fitting the project, Cloudflare
+Pages is the preferred next option for static hosting. Netlify is compatible,
+but its credit-metered free plan makes it a less predictable fit for a
+media-heavy browser game.
 
 ## Product rules
 

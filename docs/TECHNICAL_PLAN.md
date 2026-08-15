@@ -196,6 +196,21 @@ celebration, orientation change, tab recovery, and reduced motion. Save
 screenshots/short captures with metadata and distinguish browser/tooling
 failures from product defects.
 
+## Deployment
+
+The current production target is GitHub Pages:
+`https://boydcroberts.github.io/purple-cougar/`. The workflow at
+`.github/workflows/deploy-pages.yml` runs validation, builds in
+`github-pages` mode, uploads `dist`, and deploys from `main`. That mode applies
+the `/purple-cougar/` Vite base path required by a GitHub project site without
+changing the local development URL.
+
+Vercel is retired as an active target because its account usage limit was
+reached. Cloudflare Pages is the preferred fallback if the project later needs
+more predictable static-asset delivery. Netlify remains compatible but is not
+the first fallback because its free plan meters bandwidth, requests, and
+production deploys through a shared credit allowance.
+
 ## Security, privacy, and resilience
 
 - No external links, purchases, chat, ads, or child account flow in play.
